@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import logging
+from logging.handlers import RotatingFileHandler
 import time
 import traceback
 from dataclasses import dataclass
@@ -24,6 +27,7 @@ class SchedulerConfig:
     portfolio_dir: Path
     schedule_time: str
     timezone_name: str
+    log_dir: Path
     poll_seconds: int = 30
 
 
@@ -34,10 +38,62 @@ def _scenario_list(raw: list[str] | None) -> list[str]:
     return [default_scenario_name()] if scenarios else []
 
 
+def _scheduler_status_path(log_dir: Path) -> Path:
+    return log_dir / "scheduler_status.json"
+
+
+def _setup_logger(log_dir: Path) -> logging.Logger:
+    log_dir.mkdir(parents=True, exist_ok=True)
+    logger = logging.getLogger("codextrader.scheduler")
+    logger.setLevel(logging.INFO)
+    logger.handlers.clear()
+
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
+
+    file_handler = RotatingFileHandler(log_dir / "scheduler.log", maxBytes=500_000, backupCount=3)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+
+    return logger
+
+
+def _write_status(log_dir: Path, payload: dict) -> None:
+    path = _scheduler_status_path(log_dir)
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
 def run_once(config: SchedulerConfig) -> None:
+    logger = _setup_logger(config.log_dir)
+    started_at = datetime.now(ZoneInfo(config.timezone_name)).isoformat()
+    status = {
+        "state": "running",
+        "started_at": started_at,
+        "provider": config.provider,
+        "scenarios": config.scenarios,
+        "schedule_time": config.schedule_time,
+        "timezone": config.timezone_name,
+        "last_successful_run": None,
+        "last_failed_run": None,
+        "last_error": None,
+        "last_results": [],
+    }
+    existing_status = _scheduler_status_path(config.log_dir)
+    if existing_status.exists():
+        previous = json.loads(existing_status.read_text(encoding="utf-8"))
+        status["last_successful_run"] = previous.get("last_successful_run")
+        status["last_failed_run"] = previous.get("last_failed_run")
+        status["last_error"] = previous.get("last_error")
+        status["last_results"] = previous.get("last_results", [])
+    _write_status(config.log_dir, status)
+
+    results = []
     for scenario_name in config.scenarios:
         output_dir = config.output_root / scenario_name
-        print(f"[scheduler] running scenario={scenario_name} provider={config.provider}")
+        logger.info("[scheduler] running scenario=%s provider=%s", scenario_name, config.provider)
         brief, decisions, paths, execution = run_end_of_day_decision(
             tickers=None,
             provider_name=config.provider,
@@ -48,21 +104,61 @@ def run_once(config: SchedulerConfig) -> None:
             scenario_name=scenario_name,
             portfolio_dir=config.portfolio_dir,
         )
-        print(
-            f"[scheduler] completed scenario={scenario_name} "
-            f"market_as_of={brief.market.as_of} decisions={len(decisions)} "
-            f"executed={len(execution['executed_trades'])} execution_file={paths['execution']}"
+        result = {
+            "scenario": scenario_name,
+            "market_as_of": brief.market.as_of,
+            "decisions": len(decisions),
+            "executed_trades": len(execution["executed_trades"]),
+            "execution_file": str(paths["execution"]),
+            "completed_at": datetime.now(ZoneInfo(config.timezone_name)).isoformat(),
+        }
+        results.append(result)
+        logger.info(
+            "[scheduler] completed scenario=%s market_as_of=%s decisions=%s executed=%s execution_file=%s",
+            scenario_name,
+            brief.market.as_of,
+            len(decisions),
+            len(execution["executed_trades"]),
+            paths["execution"],
         )
+    status.update(
+        {
+            "state": "idle",
+            "last_successful_run": datetime.now(ZoneInfo(config.timezone_name)).isoformat(),
+            "last_error": None,
+            "last_results": results,
+        }
+    )
+    _write_status(config.log_dir, status)
 
 
 def run_forever(config: SchedulerConfig) -> None:
+    logger = _setup_logger(config.log_dir)
     tz = ZoneInfo(config.timezone_name)
     last_run_date = ""
     hour, minute = [int(part) for part in config.schedule_time.split(":", 1)]
 
-    print(
-        f"[scheduler] started timezone={config.timezone_name} "
-        f"time={config.schedule_time} scenarios={','.join(config.scenarios)} provider={config.provider}"
+    logger.info(
+        "[scheduler] started timezone=%s time=%s scenarios=%s provider=%s",
+        config.timezone_name,
+        config.schedule_time,
+        ",".join(config.scenarios),
+        config.provider,
+    )
+    _write_status(
+        config.log_dir,
+        {
+            "state": "idle",
+            "started_at": datetime.now(tz).isoformat(),
+            "provider": config.provider,
+            "scenarios": config.scenarios,
+            "schedule_time": config.schedule_time,
+            "timezone": config.timezone_name,
+            "last_successful_run": None,
+            "last_failed_run": None,
+            "last_error": None,
+            "last_results": [],
+        },
     )
 
     while True:
@@ -74,8 +170,18 @@ def run_forever(config: SchedulerConfig) -> None:
                 run_once(config)
                 last_run_date = today
             except Exception as exc:  # pragma: no cover - operational path
-                print(f"[scheduler] run failed: {exc}")
+                logger.error("[scheduler] run failed: %s", exc)
                 traceback.print_exc()
+                status_path = _scheduler_status_path(config.log_dir)
+                current = json.loads(status_path.read_text(encoding="utf-8")) if status_path.exists() else {}
+                current.update(
+                    {
+                        "state": "idle",
+                        "last_failed_run": datetime.now(tz).isoformat(),
+                        "last_error": str(exc),
+                    }
+                )
+                _write_status(config.log_dir, current)
                 last_run_date = today
         time.sleep(config.poll_seconds)
 
@@ -90,6 +196,7 @@ def make_scheduler_config(
     portfolio_dir: Path,
     schedule_time: str,
     timezone_name: str,
+    log_dir: Path,
     poll_seconds: int = 30,
 ) -> SchedulerConfig:
     return SchedulerConfig(
@@ -102,5 +209,6 @@ def make_scheduler_config(
         portfolio_dir=portfolio_dir,
         schedule_time=schedule_time,
         timezone_name=timezone_name,
+        log_dir=log_dir,
         poll_seconds=poll_seconds,
     )

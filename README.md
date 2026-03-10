@@ -193,6 +193,11 @@ In Docker/Unraid, `start.sh` now launches both:
 - the scheduler loop
 - the Streamlit dashboard
 
+Scheduler artifacts are persisted in `output/scheduler/`:
+
+- `scheduler.log`
+- `scheduler_status.json`
+
 Scheduler environment variables:
 
 ```bash

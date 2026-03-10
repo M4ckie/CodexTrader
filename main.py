@@ -78,6 +78,7 @@ def _build_parser() -> argparse.ArgumentParser:
     schedule.add_argument("--data-dir", default="data/market")
     schedule.add_argument("--output-root", default="output/scheduled_runs")
     schedule.add_argument("--portfolio-dir", default="output/portfolios")
+    schedule.add_argument("--log-dir", default="output/scheduler")
     schedule.add_argument("--openai-model", default="gpt-4.1-mini")
     schedule.add_argument("--max-new-trades", type=int)
     schedule.add_argument("--time", default="16:35", help="Daily schedule time in HH:MM")
@@ -228,6 +229,7 @@ def cmd_schedule(args: argparse.Namespace) -> None:
         portfolio_dir=Path(args.portfolio_dir),
         schedule_time=args.time,
         timezone_name=args.timezone,
+        log_dir=Path(args.log_dir),
         poll_seconds=args.poll_seconds,
     )
     if args.run_now:

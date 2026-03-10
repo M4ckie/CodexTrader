@@ -18,6 +18,7 @@ load_dotenv()
 ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = ROOT / "output"
 PORTFOLIO_DIR = OUTPUT_DIR / "portfolios"
+SCHEDULER_DIR = OUTPUT_DIR / "scheduler"
 
 st.set_page_config(page_title="CodexTrader", page_icon="CT", layout="wide")
 
@@ -69,6 +70,13 @@ def _equity_history_frame(history: list[dict]) -> pd.DataFrame:
     return frame.sort_values("date")
 
 
+def _load_scheduler_status() -> dict | None:
+    path = SCHEDULER_DIR / "scheduler_status.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 scenarios = get_scenarios()
 scenario_name = st.sidebar.selectbox("Scenario", options=list(scenarios.keys()))
 scenario = get_scenario(scenario_name)
@@ -78,6 +86,7 @@ st.sidebar.caption(f"Scenario file: {scenario_file_path()}")
 portfolio = load_portfolio(PORTFOLIO_DIR, scenario_name)
 execution_payload, execution_path = _find_latest_execution(scenario_name)
 brief_markdown = _load_latest_brief_markdown(execution_path)
+scheduler_status = _load_scheduler_status()
 
 if page == "Overview":
     st.title(f"CodexTrader Dashboard: {scenario_name}")
@@ -92,6 +101,17 @@ if page == "Overview":
     mid.metric("Invested", f"${invested:,.2f}")
     right.metric("Equity", f"${equity:,.2f}")
     far.metric("Open Positions", len(portfolio.positions))
+
+    st.subheader("Scheduler Status")
+    if scheduler_status:
+        a, b, c = st.columns(3)
+        a.metric("State", scheduler_status.get("state", "unknown"))
+        b.metric("Last Success", scheduler_status.get("last_successful_run") or "never")
+        c.metric("Next Daily Time", f"{scheduler_status.get('schedule_time', 'n/a')} {scheduler_status.get('timezone', '')}".strip())
+        if scheduler_status.get("last_error"):
+            st.error(f"Last scheduler error: {scheduler_status['last_error']}")
+    else:
+        st.info("No scheduler status file found yet.")
 
     st.subheader("Open Positions")
     positions_df = _positions_frame(portfolio.positions)
