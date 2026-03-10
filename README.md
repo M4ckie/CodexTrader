@@ -87,6 +87,32 @@ Run the dashboard with:
 .venv/bin/streamlit run dashboard.py
 ```
 
+## Docker / Unraid
+
+This repo now includes:
+
+- [Dockerfile](/home/jonny/projects/CodexTrader/Dockerfile)
+- [docker-compose.yml](/home/jonny/projects/CodexTrader/docker-compose.yml)
+- [start.sh](/home/jonny/projects/CodexTrader/start.sh)
+
+Default dashboard port is `8512`.
+
+I chose `8512` because your `ClaudeTrader` reference already uses `8501`. I have not verified live port availability on `192.168.68.120`, so treat `8512` as the default starting point, not a guaranteed-free port on that server.
+
+Run with Docker Compose:
+
+```bash
+docker compose up -d --build
+```
+
+Dashboard URL on your Unraid box should then be:
+
+```text
+http://192.168.68.120:8512
+```
+
+If that port is taken on the server, change `DASHBOARD_PORT` in `.env` and restart the container.
+
 ## External Data Providers
 
 Supported provider modes:

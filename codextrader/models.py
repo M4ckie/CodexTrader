@@ -121,4 +121,5 @@ class PortfolioState:
     cash: float
     positions: dict[str, dict]
     trade_log: list[dict] = field(default_factory=list)
+    equity_history: list[dict] = field(default_factory=list)
     last_updated: str = ""

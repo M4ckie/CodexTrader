@@ -28,6 +28,7 @@ def load_portfolio(base_dir: Path, scenario_name: str) -> PortfolioState:
             cash=cfg.bot.initial_cash,
             positions={},
             trade_log=[],
+            equity_history=[],
             last_updated="",
         )
 
@@ -37,6 +38,7 @@ def load_portfolio(base_dir: Path, scenario_name: str) -> PortfolioState:
         cash=float(payload["cash"]),
         positions=payload.get("positions", {}),
         trade_log=payload.get("trade_log", []),
+        equity_history=payload.get("equity_history", []),
         last_updated=payload.get("last_updated", ""),
     )
 
@@ -74,8 +76,65 @@ def build_portfolio_context(portfolio: PortfolioState, brief: DailyBrief) -> dic
         "positions": open_positions,
         "position_count": len(open_positions),
         "last_updated": portfolio.last_updated,
+        "equity_history": portfolio.equity_history,
         "mode": "paper",
     }
+
+
+def _record_equity_snapshot(portfolio: PortfolioState, brief: DailyBrief) -> None:
+    context = build_portfolio_context(portfolio, brief)
+    snapshot = {
+        "date": brief.market.as_of or datetime.now(timezone.utc).date().isoformat(),
+        "cash": context["cash"],
+        "invested": context["invested"],
+        "equity": context["equity"],
+        "position_count": context["position_count"],
+    }
+    if portfolio.equity_history and portfolio.equity_history[-1]["date"] == snapshot["date"]:
+        portfolio.equity_history[-1] = snapshot
+    else:
+        portfolio.equity_history.append(snapshot)
+
+
+def _apply_risk_exits(portfolio: PortfolioState, brief: DailyBrief) -> list[dict]:
+    cfg = _scenario(portfolio.scenario).bot
+    prices = {snapshot.ticker: snapshot.close for snapshot in brief.tickers}
+    now = brief.market.as_of or datetime.now(timezone.utc).date().isoformat()
+    trades = []
+
+    for ticker in list(portfolio.positions.keys()):
+        position = portfolio.positions[ticker]
+        price = prices.get(ticker)
+        if not price or price <= 0:
+            continue
+
+        peak_price = max(float(position.get("peak_price", position["entry_price"])), price)
+        position["peak_price"] = round(peak_price, 2)
+        stop_price = max(
+            float(position["entry_price"]) * (1 - cfg.stop_loss_pct),
+            peak_price * (1 - cfg.stop_loss_pct),
+        )
+        take_profit_price = float(position["entry_price"]) * (1 + cfg.take_profit_pct)
+
+        if price <= stop_price or price >= take_profit_price:
+            proceeds = position["shares"] * price - cfg.commission
+            pnl = (price - position["entry_price"]) * position["shares"] - cfg.commission
+            portfolio.cash += proceeds
+            del portfolio.positions[ticker]
+            reason = "risk stop" if price <= stop_price else "take profit"
+            trade = {
+                "date": now,
+                "ticker": ticker,
+                "action": "SELL",
+                "shares": position["shares"],
+                "price": round(price, 2),
+                "pnl": round(pnl, 2),
+                "reason": reason,
+                "cash_after": round(portfolio.cash, 2),
+            }
+            portfolio.trade_log.append(trade)
+            trades.append(trade)
+    return trades
 
 
 def execute_daily_decisions(
@@ -86,7 +145,7 @@ def execute_daily_decisions(
     cfg = _scenario(portfolio.scenario).bot
     prices = {snapshot.ticker: snapshot.close for snapshot in brief.tickers}
     now = brief.market.as_of or datetime.now(timezone.utc).date().isoformat()
-    trades = []
+    trades = _apply_risk_exits(portfolio, brief)
 
     invested = sum(
         portfolio.positions[ticker]["shares"] * prices.get(ticker, portfolio.positions[ticker]["entry_price"])
@@ -144,6 +203,7 @@ def execute_daily_decisions(
             "entry_price": round(price, 2),
             "entry_date": now,
             "reason": decision.reason,
+            "peak_price": round(price, 2),
         }
         trade = {
             "date": now,
@@ -159,5 +219,6 @@ def execute_daily_decisions(
         trades.append(trade)
 
     portfolio.last_updated = now
+    _record_equity_snapshot(portfolio, brief)
     context = build_portfolio_context(portfolio, brief)
     return {"executed_trades": trades, "portfolio_context": context}

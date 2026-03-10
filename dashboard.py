@@ -61,6 +61,14 @@ def _trades_frame(trades: list[dict]) -> pd.DataFrame:
     return pd.DataFrame(trades)
 
 
+def _equity_history_frame(history: list[dict]) -> pd.DataFrame:
+    if not history:
+        return pd.DataFrame(columns=["date", "equity", "cash", "invested", "position_count"])
+    frame = pd.DataFrame(history)
+    frame["date"] = pd.to_datetime(frame["date"])
+    return frame.sort_values("date")
+
+
 scenarios = get_scenarios()
 scenario_name = st.sidebar.selectbox("Scenario", options=list(scenarios.keys()))
 scenario = get_scenario(scenario_name)
@@ -103,6 +111,13 @@ if page == "Overview":
     else:
         st.info("No daily execution report found yet for this scenario.")
 
+    st.subheader("Equity History")
+    equity_df = _equity_history_frame(portfolio.equity_history)
+    if equity_df.empty:
+        st.info("No equity history yet.")
+    else:
+        st.line_chart(equity_df.set_index("date")[["equity", "cash"]], height=280)
+
 if page == "Decisions":
     st.title(f"Decisionmaking: {scenario_name}")
     if execution_payload:
@@ -134,6 +149,10 @@ if page == "Trade Log":
                 st.info("No closed trades yet.")
             else:
                 st.bar_chart(pnl_df.set_index("ticker"))
+        st.subheader("Trade Timeline")
+        trades_timeline = trades_df.copy()
+        trades_timeline["date"] = pd.to_datetime(trades_timeline["date"])
+        st.dataframe(trades_timeline.sort_values("date", ascending=False), use_container_width=True, hide_index=True)
 
 if page == "Scenario Config":
     st.title(f"Scenario Config: {scenario_name}")

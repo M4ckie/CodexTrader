@@ -90,6 +90,7 @@ def save_execution_report(
         "portfolio_context": execution["portfolio_context"],
         "decisions": [decision.__dict__ for decision in decisions],
         "executed_trades": execution["executed_trades"],
+        "equity_history": execution["portfolio_context"].get("equity_history", []),
         "tickers": [snapshot.ticker for snapshot in brief.tickers],
     }
     output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
