@@ -174,6 +174,35 @@ If you pass `--tickers`, those symbols become the candidate pool. If you omit `-
 
 This is still a simple paper engine. It does not yet model next-day open fills, stop-loss execution between sessions, or tax lots.
 
+## Scheduler
+
+The app now includes a built-in scheduler:
+
+```bash
+.venv/bin/python main.py schedule --provider alphavantage --scenario balanced_100k --time 16:35 --timezone America/New_York
+```
+
+Run one immediate scheduled cycle without waiting:
+
+```bash
+.venv/bin/python main.py schedule --provider local --scenario balanced_100k --run-now
+```
+
+In Docker/Unraid, `start.sh` now launches both:
+
+- the scheduler loop
+- the Streamlit dashboard
+
+Scheduler environment variables:
+
+```bash
+TRADE_PROVIDER=alphavantage
+SCHEDULE_SCENARIOS=balanced_100k
+OPENAI_MODEL=gpt-4.1-mini
+SCHEDULE_TIME=16:35
+SCHEDULE_TIMEZONE=America/New_York
+```
+
 ## CLI
 
 Generate market data:

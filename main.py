@@ -19,6 +19,7 @@ from codextrader.config import (
 from codextrader.data import generate_synthetic_dataset, load_market_data
 from codextrader.daily_pipeline import collect_daily_brief, discover_candidates, run_end_of_day_decision, save_brief
 from codextrader.env import load_dotenv
+from codextrader.scheduler import make_scheduler_config, run_forever, run_once
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -70,6 +71,19 @@ def _build_parser() -> argparse.ArgumentParser:
     portfolio = subparsers.add_parser("portfolio-status", help="Show persisted paper portfolio state for a scenario")
     portfolio.add_argument("--scenario", choices=scenario_choices, default=default_scenario)
     portfolio.add_argument("--portfolio-dir", default="output/portfolios")
+
+    schedule = subparsers.add_parser("schedule", help="Run the daily scheduler loop or one immediate scheduled cycle")
+    schedule.add_argument("--provider", choices=["local", "alphavantage", "fmp"], default="alphavantage")
+    schedule.add_argument("--scenario", dest="scenarios", nargs="+", choices=scenario_choices, help="Scenario names to run")
+    schedule.add_argument("--data-dir", default="data/market")
+    schedule.add_argument("--output-root", default="output/scheduled_runs")
+    schedule.add_argument("--portfolio-dir", default="output/portfolios")
+    schedule.add_argument("--openai-model", default="gpt-4.1-mini")
+    schedule.add_argument("--max-new-trades", type=int)
+    schedule.add_argument("--time", default="16:35", help="Daily schedule time in HH:MM")
+    schedule.add_argument("--timezone", default="America/New_York")
+    schedule.add_argument("--poll-seconds", type=int, default=30)
+    schedule.add_argument("--run-now", action="store_true", help="Run one cycle immediately and exit")
 
     return parser
 
@@ -203,6 +217,25 @@ def cmd_portfolio_status(args: argparse.Namespace) -> None:
     print(f"Last updated: {status['last_updated'] or 'never'}")
 
 
+def cmd_schedule(args: argparse.Namespace) -> None:
+    config = make_scheduler_config(
+        provider=args.provider,
+        scenarios=args.scenarios,
+        openai_model=args.openai_model,
+        max_new_trades=args.max_new_trades,
+        data_dir=Path(args.data_dir),
+        output_root=Path(args.output_root),
+        portfolio_dir=Path(args.portfolio_dir),
+        schedule_time=args.time,
+        timezone_name=args.timezone,
+        poll_seconds=args.poll_seconds,
+    )
+    if args.run_now:
+        run_once(config)
+    else:
+        run_forever(config)
+
+
 def main() -> None:
     load_dotenv()
     parser = _build_parser()
@@ -219,6 +252,8 @@ def main() -> None:
         cmd_scenarios(args)
     elif args.command == "portfolio-status":
         cmd_portfolio_status(args)
+    elif args.command == "schedule":
+        cmd_schedule(args)
     else:
         parser.error(f"Unknown command: {args.command}")
 
