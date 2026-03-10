@@ -77,6 +77,12 @@ def _load_scheduler_status() -> dict | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _memory_payload(execution_payload: dict | None) -> dict | None:
+    if not execution_payload:
+        return None
+    return execution_payload.get("portfolio_context", {}).get("memory")
+
+
 scenarios = get_scenarios()
 scenario_name = st.sidebar.selectbox("Scenario", options=list(scenarios.keys()))
 scenario = get_scenario(scenario_name)
@@ -141,6 +147,10 @@ if page == "Overview":
 if page == "Decisions":
     st.title(f"Decisionmaking: {scenario_name}")
     if execution_payload:
+        memory = _memory_payload(execution_payload)
+        if memory:
+            st.subheader("Portfolio Memory Sent To Model")
+            st.json(memory, expanded=False)
         decisions = execution_payload.get("decisions", [])
         if decisions:
             st.subheader("Latest Model Decisions")

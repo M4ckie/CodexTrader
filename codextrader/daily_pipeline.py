@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .config import ScenarioConfig, default_scenario_name, get_scenario
 from .brief_builder import build_daily_brief, render_brief_json, render_brief_markdown
+from .memory import build_portfolio_memory
 from .models import DailyBrief, Signal
 from .openai_strategy import decide_from_brief
 from .portfolio import build_portfolio_context, execute_daily_decisions, load_portfolio, save_portfolio
@@ -119,6 +120,7 @@ def run_end_of_day_decision(
             "positions": list(portfolio.positions.keys()),
             "position_count": len(portfolio.positions),
             "last_updated": portfolio.last_updated,
+            "memory": build_portfolio_memory(portfolio),
             "mode": "paper",
         }
     brief = collect_daily_brief(

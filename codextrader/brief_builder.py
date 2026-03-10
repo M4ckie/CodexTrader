@@ -73,7 +73,12 @@ def render_brief_markdown(brief: DailyBrief) -> str:
         lines.append("")
         lines.append("Portfolio context:")
         for key, value in brief.portfolio_context.items():
-            lines.append(f"- {key}: {value}")
+            if key == "memory" and isinstance(value, dict):
+                lines.append("- memory:")
+                for memory_key, memory_value in value.items():
+                    lines.append(f"  - {memory_key}: {memory_value}")
+            else:
+                lines.append(f"- {key}: {value}")
     lines.append("")
     lines.append("Ticker briefs:")
     for snapshot in brief.tickers:

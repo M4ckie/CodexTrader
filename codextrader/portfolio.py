@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import ScenarioConfig, get_scenario
+from .memory import build_portfolio_memory
 from .models import DailyBrief, PortfolioState, Signal
 
 
@@ -77,6 +78,7 @@ def build_portfolio_context(portfolio: PortfolioState, brief: DailyBrief) -> dic
         "position_count": len(open_positions),
         "last_updated": portfolio.last_updated,
         "equity_history": portfolio.equity_history,
+        "memory": build_portfolio_memory(portfolio),
         "mode": "paper",
     }
 
