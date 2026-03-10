@@ -1,0 +1,109 @@
+{
+  "default_scenario": "balanced_100k",
+  "scenarios": {
+    "balanced_100k": {
+      "description": "Default medium-risk end-of-day profile for a $100,000 account.",
+      "bot": {
+        "initial_cash": 100000.0,
+        "max_positions": 4,
+        "position_size_pct": 0.2,
+        "buy_threshold": 0.55,
+        "sell_threshold": -0.2,
+        "stop_loss_pct": 0.08,
+        "take_profit_pct": 0.18,
+        "slippage_pct": 0.001,
+        "commission": 1.0,
+        "confidence_scale": 1.6
+      },
+      "universe": {
+        "market_scope": "us_equities",
+        "min_price": 10.0,
+        "min_market_cap": 2000000000.0,
+        "min_avg_dollar_volume": 20000000.0,
+        "include_etfs": false,
+        "max_universe_size": 60,
+        "max_brief_candidates": 12
+      },
+      "max_new_trades": 3,
+      "avoid_earnings_within_days": 3
+    },
+    "small_1000": {
+      "description": "Smaller $1,000 account with tighter position count and more concentrated sizing.",
+      "bot": {
+        "initial_cash": 1000.0,
+        "max_positions": 3,
+        "position_size_pct": 0.3,
+        "buy_threshold": 0.52,
+        "sell_threshold": -0.18,
+        "stop_loss_pct": 0.1,
+        "take_profit_pct": 0.22,
+        "slippage_pct": 0.001,
+        "commission": 1.0,
+        "confidence_scale": 1.6
+      },
+      "universe": {
+        "market_scope": "us_equities",
+        "min_price": 5.0,
+        "min_market_cap": 500000000.0,
+        "min_avg_dollar_volume": 10000000.0,
+        "include_etfs": false,
+        "max_universe_size": 80,
+        "max_brief_candidates": 10
+      },
+      "max_new_trades": 2,
+      "avoid_earnings_within_days": 1
+    },
+    "conservative_100k": {
+      "description": "Lower turnover and tighter risk controls for a larger account.",
+      "bot": {
+        "initial_cash": 100000.0,
+        "max_positions": 3,
+        "position_size_pct": 0.15,
+        "buy_threshold": 0.62,
+        "sell_threshold": -0.15,
+        "stop_loss_pct": 0.06,
+        "take_profit_pct": 0.14,
+        "slippage_pct": 0.001,
+        "commission": 1.0,
+        "confidence_scale": 1.6
+      },
+      "universe": {
+        "market_scope": "us_equities",
+        "min_price": 15.0,
+        "min_market_cap": 10000000000.0,
+        "min_avg_dollar_volume": 50000000.0,
+        "include_etfs": false,
+        "max_universe_size": 40,
+        "max_brief_candidates": 10
+      },
+      "max_new_trades": 2,
+      "avoid_earnings_within_days": 5
+    },
+    "aggressive_100k": {
+      "description": "Higher turnover and wider risk budget for a larger account.",
+      "bot": {
+        "initial_cash": 100000.0,
+        "max_positions": 6,
+        "position_size_pct": 0.24,
+        "buy_threshold": 0.48,
+        "sell_threshold": -0.25,
+        "stop_loss_pct": 0.1,
+        "take_profit_pct": 0.24,
+        "slippage_pct": 0.001,
+        "commission": 1.0,
+        "confidence_scale": 1.6
+      },
+      "universe": {
+        "market_scope": "us_equities",
+        "min_price": 5.0,
+        "min_market_cap": 500000000.0,
+        "min_avg_dollar_volume": 10000000.0,
+        "include_etfs": false,
+        "max_universe_size": 80,
+        "max_brief_candidates": 15
+      },
+      "max_new_trades": 4,
+      "avoid_earnings_within_days": 1
+    }
+  }
+}
