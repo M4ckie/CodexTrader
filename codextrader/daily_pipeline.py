@@ -91,10 +91,18 @@ def save_execution_report(
         "portfolio_context": execution["portfolio_context"],
         "decisions": [decision.__dict__ for decision in decisions],
         "executed_trades": execution["executed_trades"],
+        "placed_orders": execution.get("placed_orders", []),
         "equity_history": execution["portfolio_context"].get("equity_history", []),
         "tickers": [snapshot.ticker for snapshot in brief.tickers],
     }
     output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def save_review_report(portfolio, output_path: Path) -> None:
+    from .memory import build_review_artifact
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(build_review_artifact(portfolio), indent=2), encoding="utf-8")
 
 
 def run_end_of_day_decision(
@@ -145,6 +153,9 @@ def run_end_of_day_decision(
     execution_path = output_dir / "daily_execution.json"
     save_execution_report(brief, decisions, execution, scenario_key, execution_path)
     paths["execution"] = execution_path
+    review_path = output_dir / "daily_review.json"
+    save_review_report(portfolio, review_path)
+    paths["review"] = review_path
     return brief, decisions, paths, execution
 
 

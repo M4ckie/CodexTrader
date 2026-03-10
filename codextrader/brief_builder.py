@@ -13,6 +13,9 @@ def _ticker_summary(snapshot: TickerSnapshot) -> dict:
     return {
         "ticker": snapshot.ticker,
         "as_of": snapshot.as_of,
+        "open": snapshot.open,
+        "high": snapshot.high,
+        "low": snapshot.low,
         "close": snapshot.close,
         "returns": {
             "day_pct": snapshot.day_change_pct,
@@ -84,7 +87,7 @@ def render_brief_markdown(brief: DailyBrief) -> str:
     for snapshot in brief.tickers:
         lines.append(f"## {snapshot.ticker}")
         lines.append(
-            f"- Close {snapshot.close:.2f} | 1d {snapshot.day_change_pct:.2f}% | 5d {snapshot.week_change_pct:.2f}% | 20d {snapshot.month_change_pct:.2f}%"
+            f"- Open {snapshot.open:.2f} | High {snapshot.high:.2f} | Low {snapshot.low:.2f} | Close {snapshot.close:.2f} | 1d {snapshot.day_change_pct:.2f}% | 5d {snapshot.week_change_pct:.2f}% | 20d {snapshot.month_change_pct:.2f}%"
         )
         lines.append(
             f"- SMA20 {snapshot.sma_20:.2f} | SMA50 {snapshot.sma_50:.2f} | Vol20 {snapshot.volatility_20_pct:.2f}% | RelVol {snapshot.relative_volume:.2f}"

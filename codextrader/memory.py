@@ -59,3 +59,20 @@ def build_portfolio_memory(portfolio: PortfolioState, recent_trade_limit: int = 
         "worst_symbols": [{"ticker": ticker, "pnl": round(pnl, 2)} for ticker, pnl in worst_symbols if ticker],
         "lessons": lessons,
     }
+
+
+def build_review_artifact(portfolio: PortfolioState) -> dict:
+    memory = build_portfolio_memory(portfolio)
+    recommendations = []
+    if memory["worst_symbols"]:
+        recommendations.append("Reduce repeat exposure to the weakest recent symbols unless the setup materially changes.")
+    if memory["win_rate_pct"] < 40 and memory["closed_trades"] >= 5:
+        recommendations.append("Tighten entry selectivity; current win rate suggests too many marginal trades.")
+    if memory["best_symbols"]:
+        recommendations.append("Favor setups resembling the strongest recent symbols when trend and liquidity align.")
+    if not recommendations:
+        recommendations.append("Insufficient closed-trade history for strong adaptive guidance yet.")
+    return {
+        "summary": memory,
+        "recommendations": recommendations,
+    }

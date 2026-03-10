@@ -124,6 +124,9 @@ class LocalCsvResearchProvider(ResearchProvider):
         return TickerSnapshot(
             ticker=ticker,
             as_of=current.date,
+            open=current.open,
+            high=current.high,
+            low=current.low,
             close=current.close,
             day_change_pct=round(_safe_pct_change(current.close, closes[-2]) * 100, 2),
             week_change_pct=round(_safe_pct_change(current.close, closes[-6]) * 100, 2),
@@ -245,6 +248,9 @@ class AlphaVantageResearchProvider(ResearchProvider):
         return TickerSnapshot(
             ticker=ticker,
             as_of=current_date,
+            open=round(float(series[current_date]["1. open"]), 2),
+            high=round(float(series[current_date]["2. high"]), 2),
+            low=round(float(series[current_date]["3. low"]), 2),
             close=round(current_close, 2),
             day_change_pct=round(_safe_pct_change(closes[-1], closes[-2]) * 100, 2),
             week_change_pct=round(_safe_pct_change(closes[-1], closes[-6]) * 100, 2),
@@ -386,6 +392,9 @@ class FmpResearchProvider(ResearchProvider):
         return TickerSnapshot(
             ticker=ticker,
             as_of=current["date"],
+            open=round(float(current["open"]), 2),
+            high=round(float(current["high"]), 2),
+            low=round(float(current["low"]), 2),
             close=round(float(current["close"]), 2),
             day_change_pct=round(_safe_pct_change(closes[-1], closes[-2]) * 100, 2),
             week_change_pct=round(_safe_pct_change(closes[-1], closes[-6]) * 100, 2),

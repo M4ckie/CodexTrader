@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import ScenarioConfig, get_scenario
-from .memory import build_portfolio_memory
+from .memory import build_portfolio_memory, build_review_artifact
 from .models import DailyBrief, PortfolioState, Signal
 
 
@@ -28,6 +28,7 @@ def load_portfolio(base_dir: Path, scenario_name: str) -> PortfolioState:
             scenario=scenario_name,
             cash=cfg.bot.initial_cash,
             positions={},
+            pending_orders=[],
             trade_log=[],
             equity_history=[],
             last_updated="",
@@ -38,6 +39,7 @@ def load_portfolio(base_dir: Path, scenario_name: str) -> PortfolioState:
         scenario=payload["scenario"],
         cash=float(payload["cash"]),
         positions=payload.get("positions", {}),
+        pending_orders=payload.get("pending_orders", []),
         trade_log=payload.get("trade_log", []),
         equity_history=payload.get("equity_history", []),
         last_updated=payload.get("last_updated", ""),
@@ -77,10 +79,80 @@ def build_portfolio_context(portfolio: PortfolioState, brief: DailyBrief) -> dic
         "positions": open_positions,
         "position_count": len(open_positions),
         "last_updated": portfolio.last_updated,
+        "pending_orders": portfolio.pending_orders,
         "equity_history": portfolio.equity_history,
         "memory": build_portfolio_memory(portfolio),
+        "review": build_review_artifact(portfolio),
         "mode": "paper",
     }
+
+
+def _execute_pending_orders(portfolio: PortfolioState, brief: DailyBrief) -> list[dict]:
+    cfg = _scenario(portfolio.scenario).bot
+    opens = {snapshot.ticker: snapshot.open for snapshot in brief.tickers}
+    now = brief.market.as_of or datetime.now(timezone.utc).date().isoformat()
+    trades = []
+    remaining_orders = []
+
+    for order in portfolio.pending_orders:
+        ticker = order["ticker"]
+        open_price = opens.get(ticker)
+        if not open_price or open_price <= 0:
+            remaining_orders.append(order)
+            continue
+
+        if order["action"] == "BUY":
+            if ticker in portfolio.positions:
+                continue
+            shares = int(order.get("shares", 0))
+            if shares <= 0:
+                continue
+            cost = shares * open_price + cfg.commission
+            if cost > portfolio.cash:
+                shares = int((portfolio.cash - cfg.commission) / open_price)
+                cost = shares * open_price + cfg.commission
+            if shares <= 0 or cost > portfolio.cash:
+                continue
+            portfolio.cash -= cost
+            portfolio.positions[ticker] = {
+                "shares": shares,
+                "entry_price": round(open_price, 2),
+                "entry_date": now,
+                "reason": order.get("reason", ""),
+                "peak_price": round(open_price, 2),
+            }
+            trade = {
+                "date": now,
+                "ticker": ticker,
+                "action": "BUY",
+                "shares": shares,
+                "price": round(open_price, 2),
+                "pnl": 0.0,
+                "reason": f"next-session fill: {order.get('reason', '')}".strip(),
+                "cash_after": round(portfolio.cash, 2),
+            }
+            portfolio.trade_log.append(trade)
+            trades.append(trade)
+        elif order["action"] == "SELL" and ticker in portfolio.positions:
+            position = portfolio.positions.pop(ticker)
+            proceeds = position["shares"] * open_price - cfg.commission
+            pnl = (open_price - position["entry_price"]) * position["shares"] - cfg.commission
+            portfolio.cash += proceeds
+            trade = {
+                "date": now,
+                "ticker": ticker,
+                "action": "SELL",
+                "shares": position["shares"],
+                "price": round(open_price, 2),
+                "pnl": round(pnl, 2),
+                "reason": f"next-session fill: {order.get('reason', '')}".strip(),
+                "cash_after": round(portfolio.cash, 2),
+            }
+            portfolio.trade_log.append(trade)
+            trades.append(trade)
+
+    portfolio.pending_orders = remaining_orders
+    return trades
 
 
 def _record_equity_snapshot(portfolio: PortfolioState, brief: DailyBrief) -> None:
@@ -100,17 +172,17 @@ def _record_equity_snapshot(portfolio: PortfolioState, brief: DailyBrief) -> Non
 
 def _apply_risk_exits(portfolio: PortfolioState, brief: DailyBrief) -> list[dict]:
     cfg = _scenario(portfolio.scenario).bot
-    prices = {snapshot.ticker: snapshot.close for snapshot in brief.tickers}
+    bars = {snapshot.ticker: snapshot for snapshot in brief.tickers}
     now = brief.market.as_of or datetime.now(timezone.utc).date().isoformat()
     trades = []
 
     for ticker in list(portfolio.positions.keys()):
         position = portfolio.positions[ticker]
-        price = prices.get(ticker)
-        if not price or price <= 0:
+        bar = bars.get(ticker)
+        if not bar:
             continue
 
-        peak_price = max(float(position.get("peak_price", position["entry_price"])), price)
+        peak_price = max(float(position.get("peak_price", position["entry_price"])), bar.high)
         position["peak_price"] = round(peak_price, 2)
         stop_price = max(
             float(position["entry_price"]) * (1 - cfg.stop_loss_pct),
@@ -118,18 +190,26 @@ def _apply_risk_exits(portfolio: PortfolioState, brief: DailyBrief) -> list[dict
         )
         take_profit_price = float(position["entry_price"]) * (1 + cfg.take_profit_pct)
 
-        if price <= stop_price or price >= take_profit_price:
-            proceeds = position["shares"] * price - cfg.commission
-            pnl = (price - position["entry_price"]) * position["shares"] - cfg.commission
+        fill_price = None
+        reason = None
+        if bar.low <= stop_price:
+            fill_price = stop_price
+            reason = "risk stop"
+        elif bar.high >= take_profit_price:
+            fill_price = take_profit_price
+            reason = "take profit"
+
+        if fill_price is not None:
+            proceeds = position["shares"] * fill_price - cfg.commission
+            pnl = (fill_price - position["entry_price"]) * position["shares"] - cfg.commission
             portfolio.cash += proceeds
             del portfolio.positions[ticker]
-            reason = "risk stop" if price <= stop_price else "take profit"
             trade = {
                 "date": now,
                 "ticker": ticker,
                 "action": "SELL",
                 "shares": position["shares"],
-                "price": round(price, 2),
+                "price": round(fill_price, 2),
                 "pnl": round(pnl, 2),
                 "reason": reason,
                 "cash_after": round(portfolio.cash, 2),
@@ -147,7 +227,8 @@ def execute_daily_decisions(
     cfg = _scenario(portfolio.scenario).bot
     prices = {snapshot.ticker: snapshot.close for snapshot in brief.tickers}
     now = brief.market.as_of or datetime.now(timezone.utc).date().isoformat()
-    trades = _apply_risk_exits(portfolio, brief)
+    trades = _execute_pending_orders(portfolio, brief)
+    trades.extend(_apply_risk_exits(portfolio, brief))
 
     invested = sum(
         portfolio.positions[ticker]["shares"] * prices.get(ticker, portfolio.positions[ticker]["entry_price"])
@@ -162,22 +243,9 @@ def execute_daily_decisions(
             continue
 
         if decision.action == "SELL" and ticker in portfolio.positions:
-            position = portfolio.positions.pop(ticker)
-            proceeds = position["shares"] * price - cfg.commission
-            pnl = (price - position["entry_price"]) * position["shares"] - cfg.commission
-            portfolio.cash += proceeds
-            trade = {
-                "date": now,
-                "ticker": ticker,
-                "action": "SELL",
-                "shares": position["shares"],
-                "price": round(price, 2),
-                "pnl": round(pnl, 2),
-                "reason": decision.reason,
-                "cash_after": round(portfolio.cash, 2),
-            }
-            portfolio.trade_log.append(trade)
-            trades.append(trade)
+            portfolio.pending_orders.append(
+                {"ticker": ticker, "action": "SELL", "reason": decision.reason, "placed_at": now}
+            )
 
     available_slots = max(0, cfg.max_positions - len(portfolio.positions))
     for decision in [item for item in decisions if item.action == "BUY"][:available_slots]:
@@ -192,35 +260,27 @@ def execute_daily_decisions(
         shares = int((target_value - cfg.commission) / price)
         if shares <= 0:
             continue
-        cost = shares * price + cfg.commission
-        if cost > portfolio.cash:
+        est_cost = shares * price + cfg.commission
+        if est_cost > portfolio.cash:
             shares = int((portfolio.cash - cfg.commission) / price)
-            cost = shares * price + cfg.commission
-        if shares <= 0 or cost > portfolio.cash:
+            est_cost = shares * price + cfg.commission
+        if shares <= 0 or est_cost > portfolio.cash:
             continue
-
-        portfolio.cash -= cost
-        portfolio.positions[ticker] = {
-            "shares": shares,
-            "entry_price": round(price, 2),
-            "entry_date": now,
-            "reason": decision.reason,
-            "peak_price": round(price, 2),
-        }
-        trade = {
-            "date": now,
-            "ticker": ticker,
-            "action": "BUY",
-            "shares": shares,
-            "price": round(price, 2),
-            "pnl": 0.0,
-            "reason": decision.reason,
-            "cash_after": round(portfolio.cash, 2),
-        }
-        portfolio.trade_log.append(trade)
-        trades.append(trade)
+        portfolio.pending_orders.append(
+            {
+                "ticker": ticker,
+                "action": "BUY",
+                "shares": shares,
+                "reason": decision.reason,
+                "placed_at": now,
+            }
+        )
 
     portfolio.last_updated = now
     _record_equity_snapshot(portfolio, brief)
     context = build_portfolio_context(portfolio, brief)
-    return {"executed_trades": trades, "portfolio_context": context}
+    return {
+        "executed_trades": trades,
+        "placed_orders": portfolio.pending_orders,
+        "portfolio_context": context,
+    }

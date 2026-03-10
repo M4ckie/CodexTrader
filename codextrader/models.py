@@ -80,6 +80,9 @@ class FilingItem:
 class TickerSnapshot:
     ticker: str
     as_of: str
+    open: float
+    high: float
+    low: float
     close: float
     day_change_pct: float
     week_change_pct: float
@@ -120,6 +123,7 @@ class PortfolioState:
     scenario: str
     cash: float
     positions: dict[str, dict]
+    pending_orders: list[dict] = field(default_factory=list)
     trade_log: list[dict] = field(default_factory=list)
     equity_history: list[dict] = field(default_factory=list)
     last_updated: str = ""
