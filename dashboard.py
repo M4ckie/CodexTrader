@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from codextrader.app_meta import APP_NAME, DASHBOARD_PAGES
 from codextrader.config import get_scenario, get_scenarios, scenario_file_path
 from codextrader.env import load_dotenv
 from codextrader.portfolio import load_portfolio
@@ -20,7 +21,7 @@ OUTPUT_DIR = ROOT / "output"
 PORTFOLIO_DIR = OUTPUT_DIR / "portfolios"
 SCHEDULER_DIR = OUTPUT_DIR / "scheduler"
 
-st.set_page_config(page_title="CodexTrader", page_icon="CT", layout="wide")
+st.set_page_config(page_title=APP_NAME, page_icon="CT", layout="wide")
 
 
 def _find_latest_execution(scenario_name: str) -> tuple[dict | None, Path | None]:
@@ -124,7 +125,7 @@ def _history_index_frame(history: list[tuple[dict, Path]]) -> pd.DataFrame:
 scenarios = get_scenarios()
 scenario_name = st.sidebar.selectbox("Scenario", options=list(scenarios.keys()))
 scenario = get_scenario(scenario_name)
-page = st.sidebar.radio("Page", ["Overview", "Decisions", "Brief History", "Trade Log", "Scenario Config"])
+page = st.sidebar.radio("Page", DASHBOARD_PAGES)
 st.sidebar.caption(f"Scenario file: {scenario_file_path()}")
 
 portfolio = load_portfolio(PORTFOLIO_DIR, scenario_name)
@@ -134,7 +135,7 @@ brief_markdown = _load_latest_brief_markdown(execution_path)
 scheduler_status = _load_scheduler_status()
 
 if page == "Overview":
-    st.title(f"CodexTrader Dashboard: {scenario_name}")
+    st.title(f"{APP_NAME} Dashboard: {scenario_name}")
     left, mid, right, far = st.columns(4)
     invested = 0.0
     if execution_payload:

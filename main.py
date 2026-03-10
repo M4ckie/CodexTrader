@@ -20,6 +20,7 @@ from codextrader.data import generate_synthetic_dataset, load_market_data
 from codextrader.daily_pipeline import collect_daily_brief, discover_candidates, run_end_of_day_decision, save_brief
 from codextrader.env import load_dotenv
 from codextrader.scheduler import make_scheduler_config, run_forever, run_once
+from codextrader.smoke import run_smoke_check
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -85,6 +86,13 @@ def _build_parser() -> argparse.ArgumentParser:
     schedule.add_argument("--timezone", default="America/New_York")
     schedule.add_argument("--poll-seconds", type=int, default=30)
     schedule.add_argument("--run-now", action="store_true", help="Run one cycle immediately and exit")
+
+    smoke = subparsers.add_parser("smoke-check", help="Run a lightweight deployment and dashboard smoke check")
+    smoke.add_argument("--scenario", choices=scenario_choices, default=default_scenario)
+    smoke.add_argument("--output-dir", default="output")
+    smoke.add_argument("--portfolio-dir", default="output/portfolios")
+    smoke.add_argument("--url", help="Optional dashboard URL to verify over HTTP")
+    smoke.add_argument("--json", action="store_true", help="Emit the report as JSON")
 
     return parser
 
@@ -238,6 +246,35 @@ def cmd_schedule(args: argparse.Namespace) -> None:
         run_forever(config)
 
 
+def cmd_smoke_check(args: argparse.Namespace) -> None:
+    report = run_smoke_check(
+        output_dir=Path(args.output_dir),
+        portfolio_dir=Path(args.portfolio_dir),
+        scenario_name=args.scenario,
+        url=args.url,
+    )
+    if args.json:
+        import json
+
+        print(json.dumps(report, indent=2))
+        if report["status"] == "fail":
+            raise SystemExit(1)
+        return
+
+    print(f"{report['app_name']} smoke check")
+    print(f"Version: {report['app_version']}")
+    print(f"Git SHA: {report['git_sha'] or 'unknown'}")
+    print(f"Scenario: {report['scenario']}")
+    print(f"Status: {report['status']}")
+    for check in report["checks"]:
+        print(f"- {check['name']}: {check['status']}")
+        details = check.get("details", {})
+        if details:
+            print(f"  {details}")
+    if report["status"] == "fail":
+        raise SystemExit(1)
+
+
 def main() -> None:
     load_dotenv()
     parser = _build_parser()
@@ -256,6 +293,8 @@ def main() -> None:
         cmd_portfolio_status(args)
     elif args.command == "schedule":
         cmd_schedule(args)
+    elif args.command == "smoke-check":
+        cmd_smoke_check(args)
     else:
         parser.error(f"Unknown command: {args.command}")
 
