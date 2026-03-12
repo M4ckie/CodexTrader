@@ -16,6 +16,7 @@ from pathlib import Path
 from .config import UniverseConfig
 from .data import load_market_data
 from .models import FilingItem, MarketSnapshot, NewsItem, TickerSnapshot
+from .news_scraper import scrape_public_headlines
 
 
 def _safe_pct_change(current: float, previous: float) -> float:
@@ -111,15 +112,18 @@ class LocalCsvResearchProvider(ResearchProvider):
         synthetic_market_cap = max(5_000_000_000.0, current.close * avg_volume_20 * 320)
 
         direction = "bullish" if current.close > sma_20 > sma_50 else "bearish" if current.close < sma_20 < sma_50 else "mixed"
-        headlines = [
-            NewsItem(
-                title=f"{ticker} synthetic daily recap",
-                summary=f"{ticker} closed at {current.close:.2f} with a {direction} trend structure in local research data.",
-                source="local-sim",
-                published_at=current.date,
-                sentiment="positive" if direction == "bullish" else "negative" if direction == "bearish" else "neutral",
-            )
-        ]
+        headlines = scrape_public_headlines(ticker)
+        if not headlines:
+            headlines = [
+                NewsItem(
+                    title=f"{ticker} synthetic daily recap",
+                    summary=f"{ticker} closed at {current.close:.2f} with a {direction} trend structure in local research data.",
+                    source="local-sim",
+                    published_at=current.date,
+                    url="",
+                    sentiment="positive" if direction == "bullish" else "negative" if direction == "bearish" else "neutral",
+                )
+            ]
 
         return TickerSnapshot(
             ticker=ticker,
@@ -241,6 +245,7 @@ class AlphaVantageResearchProvider(ResearchProvider):
                 summary=mover_context,
                 source="Alpha Vantage",
                 published_at=current_date,
+                url="",
                 sentiment="positive" if "gainer" in mover_context.lower() else "negative" if "loser" in mover_context.lower() else "neutral",
             )
         ]
@@ -417,6 +422,7 @@ class FmpResearchProvider(ResearchProvider):
                     summary=item.get("text", ""),
                     source=item.get("site", "FMP"),
                     published_at=item.get("publishedDate", ""),
+                    url=item.get("url", ""),
                 )
                 for item in news[:3]
             ],

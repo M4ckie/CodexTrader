@@ -39,6 +39,8 @@ def discover_candidates(
                 break
             if "1 request per second" in message:
                 continue
+            if "insufficient history" in message.lower():
+                continue
             raise
     return select_candidates(snapshots, scenario.universe, scenario.avoid_earnings_within_days)
 

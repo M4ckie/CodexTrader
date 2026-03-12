@@ -121,6 +121,8 @@ Supported provider modes:
 - `alphavantage`: reads prices, overview, and news from Alpha Vantage
 - `fmp`: reads prices, profile data, and news from Financial Modeling Prep
 
+When `provider=local`, the app can also enrich tickers with public web headlines to better simulate manual research if an API is unavailable. It tries Yahoo Finance RSS first, then falls back to scraping the Finviz quote page news table. If both fail, it falls back to the synthetic local recap.
+
 Environment variables:
 
 ```bash
@@ -128,6 +130,9 @@ export OPENAI_API_KEY="..."
 export ALPHAVANTAGE_API_KEY="..."
 export FMP_API_KEY="..."
 export SEC_USER_AGENT="CodexTrader your-email@example.com"
+export NEWS_SCRAPER_ENABLED="true"
+export NEWS_SCRAPER_PROVIDER="auto"  # auto|yahoo|finviz
+export NEWS_CACHE_TTL_SECONDS="21600"
 ```
 
 The SEC adapter is included for filing enrichment and uses `SEC_USER_AGENT`, but it is not yet wired into the main brief flow because ticker-to-CIK mapping still needs to be added.
@@ -161,7 +166,7 @@ python3 main.py scenarios --verbose
 
 The scenarios are now stored in [scenarios.json](/home/jonny/projects/CodexTrader/config/scenarios.json), so you can add more account sizes and risk profiles without editing Python.
 
-If you pass `--tickers`, those symbols become the candidate pool. If you omit `--tickers`, the app auto-selects candidates from the provider's available universe. That now works with `local` and `fmp`. `alphavantage` still requires explicit tickers in this version.
+If you pass `--tickers`, those symbols become the candidate pool. If you omit `--tickers`, the app auto-selects candidates from the provider's available universe. That works with `local` and `fmp`. Alpha Vantage auto-discovery can still surface symbols with too little history, so explicit tickers remain the safer path there.
 
 ## Portfolio State
 
@@ -179,7 +184,7 @@ This is still a simple paper engine. It does not yet model next-day open fills, 
 The app now includes a built-in scheduler:
 
 ```bash
-.venv/bin/python main.py schedule --provider alphavantage --scenario balanced_100k --time 16:35 --timezone America/New_York
+.venv/bin/python main.py schedule --provider local --scenario balanced_100k --time 16:35 --timezone America/New_York
 ```
 
 Run one immediate scheduled cycle without waiting:
@@ -201,7 +206,7 @@ Scheduler artifacts are persisted in `output/scheduler/`:
 Scheduler environment variables:
 
 ```bash
-TRADE_PROVIDER=alphavantage
+TRADE_PROVIDER=local
 SCHEDULE_SCENARIOS=balanced_100k
 OPENAI_MODEL=gpt-4.1-mini
 SCHEDULE_TIME=16:35

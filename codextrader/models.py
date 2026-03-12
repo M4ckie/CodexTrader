@@ -66,6 +66,7 @@ class NewsItem:
     summary: str
     source: str
     published_at: str
+    url: str = ""
     sentiment: str = "neutral"
 
 

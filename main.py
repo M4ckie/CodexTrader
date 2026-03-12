@@ -74,7 +74,7 @@ def _build_parser() -> argparse.ArgumentParser:
     portfolio.add_argument("--portfolio-dir", default="output/portfolios")
 
     schedule = subparsers.add_parser("schedule", help="Run the daily scheduler loop or one immediate scheduled cycle")
-    schedule.add_argument("--provider", choices=["local", "alphavantage", "fmp"], default="alphavantage")
+    schedule.add_argument("--provider", choices=["local", "alphavantage", "fmp"], default="local")
     schedule.add_argument("--scenario", dest="scenarios", nargs="+", choices=scenario_choices, help="Scenario names to run")
     schedule.add_argument("--data-dir", default="data/market")
     schedule.add_argument("--output-root", default="output/scheduled_runs")
@@ -92,6 +92,7 @@ def _build_parser() -> argparse.ArgumentParser:
     smoke.add_argument("--output-dir", default="output")
     smoke.add_argument("--portfolio-dir", default="output/portfolios")
     smoke.add_argument("--url", help="Optional dashboard URL to verify over HTTP")
+    smoke.add_argument("--news-ticker", help="Optional ticker to verify public headline scraping")
     smoke.add_argument("--json", action="store_true", help="Emit the report as JSON")
 
     return parser
@@ -252,6 +253,7 @@ def cmd_smoke_check(args: argparse.Namespace) -> None:
         portfolio_dir=Path(args.portfolio_dir),
         scenario_name=args.scenario,
         url=args.url,
+        news_ticker=args.news_ticker,
     )
     if args.json:
         import json

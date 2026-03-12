@@ -42,6 +42,7 @@ def _ticker_summary(snapshot: TickerSnapshot) -> dict:
                 "summary": item.summary,
                 "source": item.source,
                 "published_at": item.published_at,
+                "url": item.url,
                 "sentiment": item.sentiment,
             }
             for item in snapshot.headlines
@@ -99,7 +100,12 @@ def render_brief_markdown(brief: DailyBrief) -> str:
         if snapshot.headlines:
             lines.append("- Headlines:")
             for item in snapshot.headlines[:3]:
-                lines.append(f"  - {item.title} ({item.sentiment})")
+                details = [item.source]
+                if item.sentiment:
+                    details.append(item.sentiment)
+                if item.url:
+                    details.append(item.url)
+                lines.append(f"  - {item.title} ({' | '.join(details)})")
         if snapshot.filings:
             lines.append("- Filings:")
             for item in snapshot.filings[:3]:

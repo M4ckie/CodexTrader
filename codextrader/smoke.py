@@ -10,6 +10,7 @@ from urllib.request import urlopen
 
 from .app_meta import APP_NAME, APP_VERSION, DASHBOARD_PAGES
 from .config import default_scenario_name, get_scenario, get_scenarios, scenario_file_path
+from .news_scraper import scrape_public_headlines
 from .portfolio import load_portfolio
 
 
@@ -63,6 +64,7 @@ def run_smoke_check(
     portfolio_dir: Path,
     scenario_name: str | None = None,
     url: str | None = None,
+    news_ticker: str | None = None,
 ) -> dict:
     repo_root = Path(__file__).resolve().parents[1]
     selected_scenario = scenario_name or default_scenario_name()
@@ -170,6 +172,33 @@ def run_smoke_check(
         http_check = _check_http(url)
         http_check["name"] = "dashboard_http"
         checks.append(http_check)
+
+    if news_ticker:
+        try:
+            headlines = scrape_public_headlines(news_ticker, max_items=3)
+            checks.append(
+                {
+                    "name": "news_scraper",
+                    "status": "pass" if headlines else "warn",
+                    "details": {
+                        "ticker": news_ticker,
+                        "headline_count": len(headlines),
+                        "sources": sorted({item.source for item in headlines}),
+                        "urls_present": sum(1 for item in headlines if item.url),
+                    },
+                }
+            )
+        except Exception as exc:
+            checks.append(
+                {
+                    "name": "news_scraper",
+                    "status": "fail",
+                    "details": {
+                        "ticker": news_ticker,
+                        "error": str(exc),
+                    },
+                }
+            )
 
     overall_status = "pass"
     if any(check["status"] == "fail" for check in checks):
