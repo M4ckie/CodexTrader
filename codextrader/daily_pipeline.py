@@ -90,6 +90,7 @@ def save_execution_report(
         "scenario": scenario_name,
         "generated_at": brief.generated_at,
         "market_as_of": brief.market.as_of,
+        "brief_portfolio_context": brief.portfolio_context,
         "portfolio_context": execution["portfolio_context"],
         "decisions": [decision.__dict__ for decision in decisions],
         "executed_trades": execution["executed_trades"],

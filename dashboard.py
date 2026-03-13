@@ -52,6 +52,15 @@ def _load_latest_brief_markdown(execution_path: Path | None) -> str | None:
     return brief_path.read_text(encoding="utf-8")
 
 
+def _load_brief_payload(execution_path: Path | None) -> dict | None:
+    if execution_path is None:
+        return None
+    brief_path = execution_path.parent / "daily_brief.json"
+    if not brief_path.exists():
+        return None
+    return json.loads(brief_path.read_text(encoding="utf-8"))
+
+
 def _positions_frame(positions: dict) -> pd.DataFrame:
     rows = []
     for ticker, position in positions.items():
@@ -100,6 +109,15 @@ def _memory_payload(execution_payload: dict | None) -> dict | None:
     return execution_payload.get("portfolio_context", {}).get("memory")
 
 
+def _brief_portfolio_context(execution_payload: dict | None, execution_path: Path | None) -> dict | None:
+    if execution_payload and execution_payload.get("brief_portfolio_context"):
+        return execution_payload["brief_portfolio_context"]
+    brief_payload = _load_brief_payload(execution_path)
+    if not brief_payload:
+        return None
+    return brief_payload.get("portfolio_context")
+
+
 def _review_payload(execution_payload: dict | None) -> dict | None:
     if not execution_payload:
         return None
@@ -133,9 +151,10 @@ execution_payload, execution_path = _find_latest_execution(scenario_name)
 execution_history = _load_execution_history(scenario_name)
 brief_markdown = _load_latest_brief_markdown(execution_path)
 scheduler_status = _load_scheduler_status()
+brief_portfolio_context = _brief_portfolio_context(execution_payload, execution_path)
 
 if page == "Overview":
-    st.title(f"{APP_NAME} Dashboard: {scenario_name}")
+    st.title(f"{APP_NAME} Dashboard: {scenario_name}", anchor=f"dashboard-{scenario_name}")
     left, mid, right, far = st.columns(4)
     invested = 0.0
     if execution_payload:
@@ -148,7 +167,7 @@ if page == "Overview":
     right.metric("Equity", f"${equity:,.2f}")
     far.metric("Open Positions", len(portfolio.positions))
 
-    st.subheader("Scheduler Status")
+    st.subheader("Scheduler Status", anchor=f"scheduler-status-{scenario_name}")
     if scheduler_status:
         a, b, c = st.columns(3)
         a.metric("State", scheduler_status.get("state", "unknown"))
@@ -159,21 +178,21 @@ if page == "Overview":
     else:
         st.info("No scheduler status file found yet.")
 
-    st.subheader("Open Positions")
+    st.subheader("Open Positions", anchor=f"open-positions-{scenario_name}")
     positions_df = _positions_frame(portfolio.positions)
     if positions_df.empty:
         st.info("No open positions for this scenario.")
     else:
         st.dataframe(positions_df, use_container_width=True, hide_index=True)
 
-    st.subheader("Pending Orders")
+    st.subheader("Pending Orders", anchor=f"pending-orders-{scenario_name}")
     pending_df = _pending_orders_frame(portfolio.pending_orders)
     if pending_df.empty:
         st.info("No pending next-session orders.")
     else:
         st.dataframe(pending_df, use_container_width=True, hide_index=True)
 
-    st.subheader("Latest Run")
+    st.subheader("Latest Run", anchor=f"latest-run-{scenario_name}")
     if execution_payload:
         st.write(f"Market as of: `{execution_payload.get('market_as_of')}`")
         st.write(f"Candidates: {', '.join(execution_payload.get('tickers', []))}")
@@ -187,27 +206,36 @@ if page == "Overview":
     else:
         st.info("No daily execution report found yet for this scenario.")
 
-    st.subheader("Equity History")
+    st.subheader("Equity History", anchor=f"equity-history-{scenario_name}")
     equity_df = _equity_history_frame(portfolio.equity_history)
     if equity_df.empty:
         st.info("No equity history yet.")
+    elif len(equity_df) == 1:
+        st.dataframe(equity_df, use_container_width=True, hide_index=True)
     else:
         st.line_chart(equity_df.set_index("date")[["equity", "cash"]], height=280)
 
 if page == "Decisions":
-    st.title(f"Decisionmaking: {scenario_name}")
+    st.title(f"Decisionmaking: {scenario_name}", anchor=f"decisionmaking-{scenario_name}")
     if execution_payload:
+        if brief_portfolio_context:
+            st.subheader("Portfolio Context Sent To Model", anchor=f"brief-context-{scenario_name}")
+            st.json(brief_portfolio_context, expanded=False)
+
+        st.subheader("Portfolio State After Latest Execution", anchor=f"post-execution-context-{scenario_name}")
+        st.json(execution_payload.get("portfolio_context", {}), expanded=False)
+
         memory = _memory_payload(execution_payload)
         if memory:
-            st.subheader("Portfolio Memory Sent To Model")
+            st.subheader("Portfolio Memory After Latest Execution", anchor=f"post-execution-memory-{scenario_name}")
             st.json(memory, expanded=False)
         decisions = execution_payload.get("decisions", [])
         if decisions:
-            st.subheader("Latest Model Decisions")
+            st.subheader("Latest Model Decisions", anchor=f"latest-decisions-{scenario_name}")
             st.dataframe(pd.DataFrame(decisions), use_container_width=True, hide_index=True)
         else:
             st.info("No decisions recorded in the latest run.")
-        st.subheader("Latest Brief")
+        st.subheader("Latest Brief Sent To Model", anchor=f"latest-brief-{scenario_name}")
         if brief_markdown:
             st.markdown(brief_markdown)
         else:
@@ -216,31 +244,31 @@ if page == "Decisions":
         st.info("Run `daily-run` first to populate decisions and briefing data.")
 
 if page == "Trade Log":
-    st.title(f"Trade Log: {scenario_name}")
+    st.title(f"Trade Log: {scenario_name}", anchor=f"trade-log-{scenario_name}")
     trades_df = _trades_frame(portfolio.trade_log)
     if trades_df.empty:
         st.info("No trades have been executed for this scenario.")
     else:
         st.dataframe(trades_df, use_container_width=True, hide_index=True)
         if "pnl" in trades_df.columns:
-            st.subheader("Realized P&L by Trade")
+            st.subheader("Realized P&L by Trade", anchor=f"realized-pnl-{scenario_name}")
             pnl_df = trades_df[trades_df["action"] == "SELL"][["ticker", "pnl"]]
             if pnl_df.empty:
                 st.info("No closed trades yet.")
             else:
                 st.bar_chart(pnl_df.set_index("ticker"))
-        st.subheader("Trade Timeline")
+        st.subheader("Trade Timeline", anchor=f"trade-timeline-{scenario_name}")
         trades_timeline = trades_df.copy()
         trades_timeline["date"] = pd.to_datetime(trades_timeline["date"])
         st.dataframe(trades_timeline.sort_values("date", ascending=False), use_container_width=True, hide_index=True)
 
 if page == "Brief History":
-    st.title(f"Brief History: {scenario_name}")
+    st.title(f"Brief History: {scenario_name}", anchor=f"brief-history-{scenario_name}")
     if not execution_history:
         st.info("No historical brief/execution files found for this scenario yet.")
     else:
         index_df = _history_index_frame(execution_history)
-        st.subheader("Available Runs")
+        st.subheader("Available Runs", anchor=f"available-runs-{scenario_name}")
         st.dataframe(index_df, use_container_width=True, hide_index=True)
 
         labels = [
@@ -251,7 +279,7 @@ if page == "Brief History":
         selected_index = labels.index(selected_label)
         selected_payload, selected_path = execution_history[selected_index]
 
-        st.subheader("Selected Run Summary")
+        st.subheader("Selected Run Summary", anchor=f"selected-run-summary-{scenario_name}")
         st.json(
             {
                 "market_as_of": selected_payload.get("market_as_of"),
@@ -262,24 +290,27 @@ if page == "Brief History":
             expanded=False,
         )
 
-        memory = _memory_payload(selected_payload)
-        if memory:
-            st.subheader("Memory Sent With Brief")
-            st.json(memory, expanded=False)
+        selected_brief_context = _brief_portfolio_context(selected_payload, selected_path)
+        if selected_brief_context:
+            st.subheader("Portfolio Context Sent To Model", anchor=f"selected-brief-context-{scenario_name}")
+            st.json(selected_brief_context, expanded=False)
+
+        st.subheader("Portfolio State After Execution", anchor=f"selected-post-execution-{scenario_name}")
+        st.json(selected_payload.get("portfolio_context", {}), expanded=False)
 
         review = _review_payload(selected_payload)
         if review:
-            st.subheader("Review Sent With Brief")
+            st.subheader("Review Sent With Brief", anchor=f"selected-review-{scenario_name}")
             st.json(review, expanded=False)
 
-        st.subheader("Decisions")
+        st.subheader("Decisions", anchor=f"selected-decisions-{scenario_name}")
         decisions = selected_payload.get("decisions", [])
         if decisions:
             st.dataframe(pd.DataFrame(decisions), use_container_width=True, hide_index=True)
         else:
             st.info("No decisions recorded for this run.")
 
-        st.subheader("Executed Trades")
+        st.subheader("Executed Trades", anchor=f"selected-executed-trades-{scenario_name}")
         executed = selected_payload.get("executed_trades", [])
         if executed:
             st.dataframe(_trades_frame(executed), use_container_width=True, hide_index=True)
@@ -287,21 +318,21 @@ if page == "Brief History":
             st.info("No trades executed in this run.")
 
         placed = selected_payload.get("placed_orders", [])
-        st.subheader("Placed Orders")
+        st.subheader("Placed Orders", anchor=f"selected-placed-orders-{scenario_name}")
         if placed:
             st.dataframe(_pending_orders_frame(placed), use_container_width=True, hide_index=True)
         else:
             st.info("No next-session orders were placed in this run.")
 
         brief_path = selected_path.parent / "daily_brief.md"
-        st.subheader("Brief Markdown")
+        st.subheader("Brief Markdown", anchor=f"selected-brief-markdown-{scenario_name}")
         if brief_path.exists():
             st.markdown(brief_path.read_text(encoding="utf-8"))
         else:
             st.info("No markdown brief found for this historical run.")
 
 if page == "Scenario Config":
-    st.title(f"Scenario Config: {scenario_name}")
+    st.title(f"Scenario Config: {scenario_name}", anchor=f"scenario-config-{scenario_name}")
     st.json(
         {
             "description": scenario.description,
