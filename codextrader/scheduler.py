@@ -35,7 +35,9 @@ def _scenario_list(raw: list[str] | None) -> list[str]:
     if raw:
         return raw
     scenarios = get_scenarios()
-    return [default_scenario_name()] if scenarios else []
+    if scenarios:
+        return list(scenarios.keys())
+    return [default_scenario_name()] if default_scenario_name() else []
 
 
 def _scheduler_status_path(log_dir: Path) -> Path:

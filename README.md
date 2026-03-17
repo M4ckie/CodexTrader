@@ -207,11 +207,13 @@ Scheduler environment variables:
 
 ```bash
 TRADE_PROVIDER=local
-SCHEDULE_SCENARIOS=balanced_100k
+SCHEDULE_SCENARIOS=
 OPENAI_MODEL=gpt-4.1-mini
 SCHEDULE_TIME=16:35
 SCHEDULE_TIMEZONE=America/New_York
 ```
+
+If `SCHEDULE_SCENARIOS` is unset or empty, the scheduler runs every scenario defined in [scenarios.json](/home/jonny/projects/CodexTrader/config/scenarios.json). Set it to a space-delimited list such as `balanced_100k conservative_100k` to limit the run set.
 
 ## CLI
 
