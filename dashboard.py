@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
+from codextrader.artifact_repository import ArtifactRepository
 from codextrader.app_meta import APP_NAME, DASHBOARD_PAGES
 from codextrader.config import get_scenario, get_scenarios, scenario_file_path
 from codextrader.env import load_dotenv
@@ -19,46 +19,16 @@ load_dotenv()
 ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = ROOT / "output"
 PORTFOLIO_DIR = OUTPUT_DIR / "portfolios"
-SCHEDULER_DIR = OUTPUT_DIR / "scheduler"
+ARTIFACTS = ArtifactRepository(OUTPUT_DIR)
 
 st.set_page_config(page_title=APP_NAME, page_icon="CT", layout="wide")
 
-
-def _find_latest_execution(scenario_name: str) -> tuple[dict | None, Path | None]:
-    candidates = sorted(OUTPUT_DIR.glob("**/daily_execution.json"), key=lambda path: path.stat().st_mtime, reverse=True)
-    for path in candidates:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        if payload.get("scenario") == scenario_name:
-            return payload, path
-    return None, None
-
-
-def _load_execution_history(scenario_name: str) -> list[tuple[dict, Path]]:
-    history: list[tuple[dict, Path]] = []
-    candidates = sorted(OUTPUT_DIR.glob("**/daily_execution.json"), key=lambda path: path.stat().st_mtime, reverse=True)
-    for path in candidates:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        if payload.get("scenario") == scenario_name:
-            history.append((payload, path))
-    return history
-
-
 def _load_latest_brief_markdown(execution_path: Path | None) -> str | None:
-    if execution_path is None:
-        return None
-    brief_path = execution_path.parent / "daily_brief.md"
-    if not brief_path.exists():
-        return None
-    return brief_path.read_text(encoding="utf-8")
+    return ARTIFACTS.load_brief_markdown(execution_path)
 
 
 def _load_brief_payload(execution_path: Path | None) -> dict | None:
-    if execution_path is None:
-        return None
-    brief_path = execution_path.parent / "daily_brief.json"
-    if not brief_path.exists():
-        return None
-    return json.loads(brief_path.read_text(encoding="utf-8"))
+    return ARTIFACTS.load_brief_payload(execution_path)
 
 
 def _positions_frame(positions: dict) -> pd.DataFrame:
@@ -96,44 +66,37 @@ def _equity_history_frame(history: list[dict]) -> pd.DataFrame:
     return frame.sort_values("date")
 
 
-def _load_scheduler_status() -> dict | None:
-    path = SCHEDULER_DIR / "scheduler_status.json"
-    if not path.exists():
-        return None
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _memory_payload(execution_payload: dict | None) -> dict | None:
+def _memory_payload(execution_payload) -> dict | None:
     if not execution_payload:
         return None
-    return execution_payload.get("portfolio_context", {}).get("memory")
+    return execution_payload.portfolio_context.get("memory")
 
 
-def _brief_portfolio_context(execution_payload: dict | None, execution_path: Path | None) -> dict | None:
-    if execution_payload and execution_payload.get("brief_portfolio_context"):
-        return execution_payload["brief_portfolio_context"]
+def _brief_portfolio_context(execution_payload, execution_path: Path | None) -> dict | None:
+    if execution_payload and execution_payload.brief_portfolio_context:
+        return execution_payload.brief_portfolio_context
     brief_payload = _load_brief_payload(execution_path)
     if not brief_payload:
         return None
     return brief_payload.get("portfolio_context")
 
 
-def _review_payload(execution_payload: dict | None) -> dict | None:
+def _review_payload(execution_payload) -> dict | None:
     if not execution_payload:
         return None
-    return execution_payload.get("portfolio_context", {}).get("review")
+    return execution_payload.portfolio_context.get("review")
 
 
-def _history_index_frame(history: list[tuple[dict, Path]]) -> pd.DataFrame:
+def _history_index_frame(history) -> pd.DataFrame:
     rows = []
     for payload, path in history:
         rows.append(
             {
-                "market_as_of": payload.get("market_as_of"),
-                "generated_at": payload.get("generated_at"),
-                "decisions": len(payload.get("decisions", [])),
-                "executed_trades": len(payload.get("executed_trades", [])),
-                "placed_orders": len(payload.get("placed_orders", [])),
+                "market_as_of": payload.market_as_of,
+                "generated_at": payload.generated_at,
+                "decisions": len(payload.decisions),
+                "executed_trades": len(payload.executed_trades),
+                "placed_orders": len(payload.placed_orders),
                 "path": str(path),
             }
         )
@@ -147,10 +110,10 @@ page = st.sidebar.radio("Page", DASHBOARD_PAGES)
 st.sidebar.caption(f"Scenario file: {scenario_file_path()}")
 
 portfolio = load_portfolio(PORTFOLIO_DIR, scenario_name)
-execution_payload, execution_path = _find_latest_execution(scenario_name)
-execution_history = _load_execution_history(scenario_name)
+execution_payload, execution_path = ARTIFACTS.find_latest_execution(scenario_name)
+execution_history = ARTIFACTS.load_execution_history(scenario_name)
 brief_markdown = _load_latest_brief_markdown(execution_path)
-scheduler_status = _load_scheduler_status()
+scheduler_status = ARTIFACTS.load_scheduler_status()
 brief_portfolio_context = _brief_portfolio_context(execution_payload, execution_path)
 
 if page == "Overview":
@@ -158,8 +121,8 @@ if page == "Overview":
     left, mid, right, far = st.columns(4)
     invested = 0.0
     if execution_payload:
-        invested = execution_payload["portfolio_context"].get("invested", 0.0)
-        equity = execution_payload["portfolio_context"].get("equity", portfolio.cash)
+        invested = execution_payload.portfolio_context.get("invested", 0.0)
+        equity = execution_payload.portfolio_context.get("equity", portfolio.cash)
     else:
         equity = portfolio.cash
     left.metric("Cash", f"${portfolio.cash:,.2f}")
@@ -170,11 +133,11 @@ if page == "Overview":
     st.subheader("Scheduler Status", anchor=f"scheduler-status-{scenario_name}")
     if scheduler_status:
         a, b, c = st.columns(3)
-        a.metric("State", scheduler_status.get("state", "unknown"))
-        b.metric("Last Success", scheduler_status.get("last_successful_run") or "never")
-        c.metric("Next Daily Time", f"{scheduler_status.get('schedule_time', 'n/a')} {scheduler_status.get('timezone', '')}".strip())
-        if scheduler_status.get("last_error"):
-            st.error(f"Last scheduler error: {scheduler_status['last_error']}")
+        a.metric("State", scheduler_status.state or "unknown")
+        b.metric("Last Success", scheduler_status.last_successful_run or "never")
+        c.metric("Next Daily Time", f"{scheduler_status.schedule_time or 'n/a'} {scheduler_status.timezone}".strip())
+        if scheduler_status.last_error:
+            st.error(f"Last scheduler error: {scheduler_status.last_error}")
     else:
         st.info("No scheduler status file found yet.")
 
@@ -183,26 +146,34 @@ if page == "Overview":
     if positions_df.empty:
         st.info("No open positions for this scenario.")
     else:
-        st.dataframe(positions_df, use_container_width=True, hide_index=True)
+        st.dataframe(positions_df, width="stretch", hide_index=True)
 
     st.subheader("Pending Orders", anchor=f"pending-orders-{scenario_name}")
     pending_df = _pending_orders_frame(portfolio.pending_orders)
     if pending_df.empty:
         st.info("No pending next-session orders.")
     else:
-        st.dataframe(pending_df, use_container_width=True, hide_index=True)
+        st.dataframe(pending_df, width="stretch", hide_index=True)
 
     st.subheader("Latest Run", anchor=f"latest-run-{scenario_name}")
     if execution_payload:
-        st.write(f"Market as of: `{execution_payload.get('market_as_of')}`")
-        st.write(f"Candidates: {', '.join(execution_payload.get('tickers', []))}")
-        if execution_payload.get("executed_trades"):
-            st.dataframe(_trades_frame(execution_payload["executed_trades"]), use_container_width=True, hide_index=True)
+        st.write(f"Market as of: `{execution_payload.market_as_of}`")
+        st.write(f"Candidates: {', '.join(execution_payload.tickers)}")
+        if execution_payload.executed_trades:
+            st.dataframe(
+                _trades_frame([item.to_dict() for item in execution_payload.executed_trades]),
+                width="stretch",
+                hide_index=True,
+            )
         else:
             st.info("No trades executed on the latest run.")
-        if execution_payload.get("placed_orders"):
+        if execution_payload.placed_orders:
             st.write("Placed for next session:")
-            st.dataframe(_pending_orders_frame(execution_payload["placed_orders"]), use_container_width=True, hide_index=True)
+            st.dataframe(
+                _pending_orders_frame([item.to_dict() for item in execution_payload.placed_orders]),
+                width="stretch",
+                hide_index=True,
+            )
     else:
         st.info("No daily execution report found yet for this scenario.")
 
@@ -211,7 +182,7 @@ if page == "Overview":
     if equity_df.empty:
         st.info("No equity history yet.")
     elif len(equity_df) == 1:
-        st.dataframe(equity_df, use_container_width=True, hide_index=True)
+        st.dataframe(equity_df, width="stretch", hide_index=True)
     else:
         st.line_chart(equity_df.set_index("date")[["equity", "cash"]], height=280)
 
@@ -223,16 +194,16 @@ if page == "Decisions":
             st.json(brief_portfolio_context, expanded=False)
 
         st.subheader("Portfolio State After Latest Execution", anchor=f"post-execution-context-{scenario_name}")
-        st.json(execution_payload.get("portfolio_context", {}), expanded=False)
+        st.json(execution_payload.portfolio_context, expanded=False)
 
         memory = _memory_payload(execution_payload)
         if memory:
             st.subheader("Portfolio Memory After Latest Execution", anchor=f"post-execution-memory-{scenario_name}")
             st.json(memory, expanded=False)
-        decisions = execution_payload.get("decisions", [])
+        decisions = execution_payload.decisions
         if decisions:
             st.subheader("Latest Model Decisions", anchor=f"latest-decisions-{scenario_name}")
-            st.dataframe(pd.DataFrame(decisions), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(decisions), width="stretch", hide_index=True)
         else:
             st.info("No decisions recorded in the latest run.")
         st.subheader("Latest Brief Sent To Model", anchor=f"latest-brief-{scenario_name}")
@@ -249,7 +220,7 @@ if page == "Trade Log":
     if trades_df.empty:
         st.info("No trades have been executed for this scenario.")
     else:
-        st.dataframe(trades_df, use_container_width=True, hide_index=True)
+        st.dataframe(trades_df, width="stretch", hide_index=True)
         if "pnl" in trades_df.columns:
             st.subheader("Realized P&L by Trade", anchor=f"realized-pnl-{scenario_name}")
             pnl_df = trades_df[trades_df["action"] == "SELL"][["ticker", "pnl"]]
@@ -260,7 +231,7 @@ if page == "Trade Log":
         st.subheader("Trade Timeline", anchor=f"trade-timeline-{scenario_name}")
         trades_timeline = trades_df.copy()
         trades_timeline["date"] = pd.to_datetime(trades_timeline["date"])
-        st.dataframe(trades_timeline.sort_values("date", ascending=False), use_container_width=True, hide_index=True)
+        st.dataframe(trades_timeline.sort_values("date", ascending=False), width="stretch", hide_index=True)
 
 if page == "Brief History":
     st.title(f"Brief History: {scenario_name}", anchor=f"brief-history-{scenario_name}")
@@ -269,10 +240,10 @@ if page == "Brief History":
     else:
         index_df = _history_index_frame(execution_history)
         st.subheader("Available Runs", anchor=f"available-runs-{scenario_name}")
-        st.dataframe(index_df, use_container_width=True, hide_index=True)
+        st.dataframe(index_df, width="stretch", hide_index=True)
 
         labels = [
-            f"{payload.get('market_as_of') or 'unknown-date'} | decisions={len(payload.get('decisions', []))} | executed={len(payload.get('executed_trades', []))}"
+            f"{payload.market_as_of or 'unknown-date'} | decisions={len(payload.decisions)} | executed={len(payload.executed_trades)}"
             for payload, _ in execution_history
         ]
         selected_label = st.selectbox("Select historical run", options=labels)
@@ -282,10 +253,10 @@ if page == "Brief History":
         st.subheader("Selected Run Summary", anchor=f"selected-run-summary-{scenario_name}")
         st.json(
             {
-                "market_as_of": selected_payload.get("market_as_of"),
-                "generated_at": selected_payload.get("generated_at"),
+                "market_as_of": selected_payload.market_as_of,
+                "generated_at": selected_payload.generated_at,
                 "execution_path": str(selected_path),
-                "tickers": selected_payload.get("tickers", []),
+                "tickers": selected_payload.tickers,
             },
             expanded=False,
         )
@@ -296,7 +267,7 @@ if page == "Brief History":
             st.json(selected_brief_context, expanded=False)
 
         st.subheader("Portfolio State After Execution", anchor=f"selected-post-execution-{scenario_name}")
-        st.json(selected_payload.get("portfolio_context", {}), expanded=False)
+        st.json(selected_payload.portfolio_context, expanded=False)
 
         review = _review_payload(selected_payload)
         if review:
@@ -304,23 +275,23 @@ if page == "Brief History":
             st.json(review, expanded=False)
 
         st.subheader("Decisions", anchor=f"selected-decisions-{scenario_name}")
-        decisions = selected_payload.get("decisions", [])
+        decisions = selected_payload.decisions
         if decisions:
-            st.dataframe(pd.DataFrame(decisions), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(decisions), width="stretch", hide_index=True)
         else:
             st.info("No decisions recorded for this run.")
 
         st.subheader("Executed Trades", anchor=f"selected-executed-trades-{scenario_name}")
-        executed = selected_payload.get("executed_trades", [])
+        executed = [item.to_dict() for item in selected_payload.executed_trades]
         if executed:
-            st.dataframe(_trades_frame(executed), use_container_width=True, hide_index=True)
+            st.dataframe(_trades_frame(executed), width="stretch", hide_index=True)
         else:
             st.info("No trades executed in this run.")
 
-        placed = selected_payload.get("placed_orders", [])
+        placed = [item.to_dict() for item in selected_payload.placed_orders]
         st.subheader("Placed Orders", anchor=f"selected-placed-orders-{scenario_name}")
         if placed:
-            st.dataframe(_pending_orders_frame(placed), use_container_width=True, hide_index=True)
+            st.dataframe(_pending_orders_frame(placed), width="stretch", hide_index=True)
         else:
             st.info("No next-session orders were placed in this run.")
 

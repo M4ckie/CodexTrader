@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
 
+from .artifact_repository import ArtifactRepository
 from .app_meta import APP_NAME, APP_VERSION, DASHBOARD_PAGES
 from .config import default_scenario_name, get_scenario, get_scenarios, scenario_file_path
 from .news_scraper import scrape_public_headlines
@@ -26,15 +26,6 @@ def _git_sha(repo_root: Path) -> str | None:
     except (OSError, subprocess.CalledProcessError):
         return None
     return result.stdout.strip() or None
-
-
-def _load_latest_execution(output_dir: Path, scenario_name: str) -> tuple[dict | None, Path | None]:
-    candidates = sorted(output_dir.glob("**/daily_execution.json"), key=lambda path: path.stat().st_mtime, reverse=True)
-    for path in candidates:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        if payload.get("scenario") == scenario_name:
-            return payload, path
-    return None, None
 
 
 def _check_http(url: str) -> dict:
@@ -68,6 +59,7 @@ def run_smoke_check(
 ) -> dict:
     repo_root = Path(__file__).resolve().parents[1]
     selected_scenario = scenario_name or default_scenario_name()
+    repository = ArtifactRepository(output_dir)
 
     checks: list[dict] = []
     scenarios = get_scenarios()
@@ -112,16 +104,16 @@ def run_smoke_check(
 
     scheduler_status_path = output_dir / "scheduler" / "scheduler_status.json"
     if scheduler_status_path.exists():
-        scheduler_status = json.loads(scheduler_status_path.read_text(encoding="utf-8"))
+        scheduler_status = repository.load_scheduler_status()
         checks.append(
             {
                 "name": "scheduler_status",
                 "status": "pass",
                 "details": {
                     "path": str(scheduler_status_path),
-                    "state": scheduler_status.get("state"),
-                    "last_successful_run": scheduler_status.get("last_successful_run"),
-                    "last_error": scheduler_status.get("last_error"),
+                    "state": scheduler_status.state if scheduler_status else None,
+                    "last_successful_run": scheduler_status.last_successful_run if scheduler_status else None,
+                    "last_error": scheduler_status.last_error if scheduler_status else None,
                 },
             }
         )
@@ -137,22 +129,23 @@ def run_smoke_check(
             }
         )
 
-    execution_payload, execution_path = _load_latest_execution(output_dir, selected_scenario)
+    execution_payload, execution_path = repository.find_latest_execution(selected_scenario)
     if execution_payload and execution_path:
+        execution_payload_dict = execution_payload.to_dict()
         required_keys = {"scenario", "market_as_of", "generated_at", "decisions", "portfolio_context"}
-        missing_keys = sorted(required_keys - set(execution_payload))
+        missing_keys = sorted(required_keys - set(execution_payload_dict))
         checks.append(
             {
                 "name": "latest_execution",
                 "status": "pass" if not missing_keys else "fail",
                 "details": {
                     "path": str(execution_path),
-                    "tickers": execution_payload.get("tickers", []),
-                    "decisions": len(execution_payload.get("decisions", [])),
-                    "executed_trades": len(execution_payload.get("executed_trades", [])),
-                    "placed_orders": len(execution_payload.get("placed_orders", [])),
-                    "has_memory": bool(execution_payload.get("portfolio_context", {}).get("memory")),
-                    "has_review": bool(execution_payload.get("portfolio_context", {}).get("review")),
+                    "tickers": execution_payload.tickers,
+                    "decisions": len(execution_payload.decisions),
+                    "executed_trades": len(execution_payload.executed_trades),
+                    "placed_orders": len(execution_payload.placed_orders),
+                    "has_memory": bool(execution_payload.portfolio_context.get("memory")),
+                    "has_review": bool(execution_payload.portfolio_context.get("review")),
                     "missing_keys": missing_keys,
                 },
             }

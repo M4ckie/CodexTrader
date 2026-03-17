@@ -41,6 +41,57 @@ def _json_get(url: str, headers: dict[str, str] | None = None) -> dict | list:
         return json.loads(response.read().decode("utf-8"))
 
 
+def _build_price_snapshot(
+    *,
+    ticker: str,
+    as_of: str,
+    open_price: float,
+    high_price: float,
+    low_price: float,
+    closes: list[float],
+    volumes: list[int],
+    market_cap: float | None = None,
+    pe_ratio: float | None = None,
+    earnings_date: str | None = None,
+    sector: str | None = None,
+    asset_type: str = "stock",
+    headlines: list[NewsItem] | None = None,
+    filings: list[FilingItem] | None = None,
+) -> TickerSnapshot:
+    sma_20 = statistics.fmean(closes[-20:])
+    sma_50 = statistics.fmean(closes[-50:])
+    avg_volume_20 = statistics.fmean(volumes[-20:])
+    volatility_20_pct = statistics.pstdev(closes[-20:]) / sma_20 * 100 if sma_20 else 0.0
+    current_close = closes[-1]
+    latest_volume = volumes[-1]
+    relative_volume = latest_volume / avg_volume_20 if avg_volume_20 else 1.0
+    return TickerSnapshot(
+        ticker=ticker,
+        as_of=as_of,
+        open=round(open_price, 2),
+        high=round(high_price, 2),
+        low=round(low_price, 2),
+        close=round(current_close, 2),
+        day_change_pct=round(_safe_pct_change(closes[-1], closes[-2]) * 100, 2),
+        week_change_pct=round(_safe_pct_change(closes[-1], closes[-6]) * 100, 2),
+        month_change_pct=round(_safe_pct_change(closes[-1], closes[-21]) * 100, 2),
+        sma_20=round(sma_20, 2),
+        sma_50=round(sma_50, 2),
+        volatility_20_pct=round(volatility_20_pct, 2),
+        avg_volume_20=round(avg_volume_20, 0),
+        avg_dollar_volume_20=round(avg_volume_20 * current_close, 0),
+        latest_volume=latest_volume,
+        relative_volume=round(relative_volume, 2),
+        market_cap=market_cap,
+        pe_ratio=pe_ratio,
+        earnings_date=earnings_date,
+        sector=sector,
+        asset_type=asset_type,
+        headlines=headlines or [],
+        filings=filings or [],
+    )
+
+
 class ResearchProvider(ABC):
     """Contract for a source of end-of-day market context."""
 
@@ -103,13 +154,10 @@ class LocalCsvResearchProvider(ResearchProvider):
         closes = [c.close for c in history]
         volumes = [c.volume for c in history]
         current = history[-1]
+        avg_volume_20 = statistics.fmean(volumes[-20:])
+        synthetic_market_cap = max(5_000_000_000.0, current.close * avg_volume_20 * 320)
         sma_20 = statistics.fmean(closes[-20:])
         sma_50 = statistics.fmean(closes[-50:])
-        volatility = statistics.pstdev(closes[-20:]) / sma_20 * 100 if sma_20 else 0.0
-        avg_volume_20 = statistics.fmean(volumes[-20:])
-        relative_volume = current.volume / avg_volume_20 if avg_volume_20 else 1.0
-        avg_dollar_volume_20 = avg_volume_20 * current.close
-        synthetic_market_cap = max(5_000_000_000.0, current.close * avg_volume_20 * 320)
 
         direction = "bullish" if current.close > sma_20 > sma_50 else "bearish" if current.close < sma_20 < sma_50 else "mixed"
         headlines = scrape_public_headlines(ticker)
@@ -125,23 +173,14 @@ class LocalCsvResearchProvider(ResearchProvider):
                 )
             ]
 
-        return TickerSnapshot(
+        return _build_price_snapshot(
             ticker=ticker,
             as_of=current.date,
-            open=current.open,
-            high=current.high,
-            low=current.low,
-            close=current.close,
-            day_change_pct=round(_safe_pct_change(current.close, closes[-2]) * 100, 2),
-            week_change_pct=round(_safe_pct_change(current.close, closes[-6]) * 100, 2),
-            month_change_pct=round(_safe_pct_change(current.close, closes[-21]) * 100, 2),
-            sma_20=round(sma_20, 2),
-            sma_50=round(sma_50, 2),
-            volatility_20_pct=round(volatility, 2),
-            avg_volume_20=round(avg_volume_20, 0),
-            avg_dollar_volume_20=round(avg_dollar_volume_20, 0),
-            latest_volume=current.volume,
-            relative_volume=round(relative_volume, 2),
+            open_price=current.open,
+            high_price=current.high,
+            low_price=current.low,
+            closes=closes,
+            volumes=volumes,
             market_cap=round(synthetic_market_cap, 0),
             sector="Synthetic",
             asset_type="stock",
@@ -235,9 +274,6 @@ class AlphaVantageResearchProvider(ResearchProvider):
         volumes = [int(series[date_key]["5. volume"]) for date_key in dates]
         current_date = dates[-1]
         current_close = closes[-1]
-        sma_20 = statistics.fmean(closes[-20:])
-        sma_50 = statistics.fmean(closes[-50:])
-        avg_volume_20 = statistics.fmean(volumes[-20:])
         mover_context = self._classify_alpha_mover(ticker)
         headlines = [
             NewsItem(
@@ -250,23 +286,14 @@ class AlphaVantageResearchProvider(ResearchProvider):
             )
         ]
 
-        return TickerSnapshot(
+        return _build_price_snapshot(
             ticker=ticker,
             as_of=current_date,
-            open=round(float(series[current_date]["1. open"]), 2),
-            high=round(float(series[current_date]["2. high"]), 2),
-            low=round(float(series[current_date]["3. low"]), 2),
-            close=round(current_close, 2),
-            day_change_pct=round(_safe_pct_change(closes[-1], closes[-2]) * 100, 2),
-            week_change_pct=round(_safe_pct_change(closes[-1], closes[-6]) * 100, 2),
-            month_change_pct=round(_safe_pct_change(closes[-1], closes[-21]) * 100, 2),
-            sma_20=round(sma_20, 2),
-            sma_50=round(sma_50, 2),
-            volatility_20_pct=round(statistics.pstdev(closes[-20:]) / sma_20 * 100, 2),
-            avg_volume_20=round(avg_volume_20, 0),
-            avg_dollar_volume_20=round(avg_volume_20 * current_close, 0),
-            latest_volume=volumes[-1],
-            relative_volume=round(volumes[-1] / avg_volume_20, 2),
+            open_price=float(series[current_date]["1. open"]),
+            high_price=float(series[current_date]["2. high"]),
+            low_price=float(series[current_date]["3. low"]),
+            closes=closes,
+            volumes=volumes,
             market_cap=_optional_float(overview.get("MarketCapitalization")),
             pe_ratio=_optional_float(overview.get("PERatio")),
             earnings_date=overview.get("LatestQuarter"),
@@ -389,28 +416,16 @@ class FmpResearchProvider(ResearchProvider):
         closes = [float(item["close"]) for item in entries]
         volumes = [int(item.get("volume", 0)) for item in entries]
         current = entries[-1]
-        sma_20 = statistics.fmean(closes[-20:])
-        sma_50 = statistics.fmean(closes[-50:])
-        avg_volume_20 = statistics.fmean(volumes[-20:])
         profile_item = profile[0] if profile else {}
 
-        return TickerSnapshot(
+        return _build_price_snapshot(
             ticker=ticker,
             as_of=current["date"],
-            open=round(float(current["open"]), 2),
-            high=round(float(current["high"]), 2),
-            low=round(float(current["low"]), 2),
-            close=round(float(current["close"]), 2),
-            day_change_pct=round(_safe_pct_change(closes[-1], closes[-2]) * 100, 2),
-            week_change_pct=round(_safe_pct_change(closes[-1], closes[-6]) * 100, 2),
-            month_change_pct=round(_safe_pct_change(closes[-1], closes[-21]) * 100, 2),
-            sma_20=round(sma_20, 2),
-            sma_50=round(sma_50, 2),
-            volatility_20_pct=round(statistics.pstdev(closes[-20:]) / sma_20 * 100, 2),
-            avg_volume_20=round(avg_volume_20, 0),
-            avg_dollar_volume_20=round(avg_volume_20 * float(current["close"]), 0),
-            latest_volume=volumes[-1],
-            relative_volume=round(volumes[-1] / avg_volume_20, 2),
+            open_price=float(current["open"]),
+            high_price=float(current["high"]),
+            low_price=float(current["low"]),
+            closes=closes,
+            volumes=volumes,
             market_cap=_optional_float(profile_item.get("mktCap")),
             pe_ratio=_optional_float(profile_item.get("pe")),
             earnings_date=profile_item.get("lastDiv"),

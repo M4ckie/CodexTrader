@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .artifacts import PortfolioArtifact
 from .config import ScenarioConfig, get_scenario
 from .memory import build_portfolio_memory, build_review_artifact
 from .models import DailyBrief, PortfolioState, Signal
@@ -35,21 +35,13 @@ def load_portfolio(base_dir: Path, scenario_name: str) -> PortfolioState:
         )
 
     payload = json.loads(path.read_text(encoding="utf-8"))
-    return PortfolioState(
-        scenario=payload["scenario"],
-        cash=float(payload["cash"]),
-        positions=payload.get("positions", {}),
-        pending_orders=payload.get("pending_orders", []),
-        trade_log=payload.get("trade_log", []),
-        equity_history=payload.get("equity_history", []),
-        last_updated=payload.get("last_updated", ""),
-    )
+    return PortfolioArtifact.from_dict(payload).to_portfolio_state()
 
 
 def save_portfolio(base_dir: Path, portfolio: PortfolioState) -> Path:
     base_dir.mkdir(parents=True, exist_ok=True)
     path = _portfolio_path(base_dir, portfolio.scenario)
-    path.write_text(json.dumps(asdict(portfolio), indent=2), encoding="utf-8")
+    path.write_text(json.dumps(PortfolioArtifact.from_portfolio_state(portfolio).to_dict(), indent=2), encoding="utf-8")
     return path
 
 
@@ -236,18 +228,42 @@ def execute_daily_decisions(
     )
     equity = portfolio.cash + invested
 
+    _queue_sell_orders(portfolio, decisions, prices, now)
+
+    available_slots = max(0, cfg.max_positions - len(portfolio.positions))
+    _queue_buy_orders(portfolio, decisions, prices, now, equity, available_slots)
+
+    portfolio.last_updated = now
+    _record_equity_snapshot(portfolio, brief)
+    context = build_portfolio_context(portfolio, brief)
+    return {
+        "executed_trades": trades,
+        "placed_orders": portfolio.pending_orders,
+        "portfolio_context": context,
+    }
+
+
+def _queue_sell_orders(portfolio: PortfolioState, decisions: list[Signal], prices: dict[str, float], now: str) -> None:
     for decision in decisions:
         ticker = decision.ticker
         price = prices.get(ticker)
         if not price or price <= 0:
             continue
-
         if decision.action == "SELL" and ticker in portfolio.positions:
             portfolio.pending_orders.append(
                 {"ticker": ticker, "action": "SELL", "reason": decision.reason, "placed_at": now}
             )
 
-    available_slots = max(0, cfg.max_positions - len(portfolio.positions))
+
+def _queue_buy_orders(
+    portfolio: PortfolioState,
+    decisions: list[Signal],
+    prices: dict[str, float],
+    now: str,
+    equity: float,
+    available_slots: int,
+) -> None:
+    cfg = _scenario(portfolio.scenario).bot
     for decision in [item for item in decisions if item.action == "BUY"][:available_slots]:
         ticker = decision.ticker
         if ticker in portfolio.positions:
@@ -275,12 +291,3 @@ def execute_daily_decisions(
                 "placed_at": now,
             }
         )
-
-    portfolio.last_updated = now
-    _record_equity_snapshot(portfolio, brief)
-    context = build_portfolio_context(portfolio, brief)
-    return {
-        "executed_trades": trades,
-        "placed_orders": portfolio.pending_orders,
-        "portfolio_context": context,
-    }

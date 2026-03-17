@@ -114,10 +114,14 @@ def render_brief_markdown(brief: DailyBrief) -> str:
 
 
 def render_brief_json(brief: DailyBrief) -> str:
-    payload = {
+    payload = render_brief_payload(brief)
+    return json.dumps(payload, indent=2)
+
+
+def render_brief_payload(brief: DailyBrief) -> dict:
+    return {
         "generated_at": brief.generated_at,
         "market": asdict(brief.market),
         "portfolio_context": brief.portfolio_context,
         "tickers": [_ticker_summary(snapshot) for snapshot in brief.tickers],
     }
-    return json.dumps(payload, indent=2)
