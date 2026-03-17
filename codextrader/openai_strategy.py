@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import os
 import re
+from typing import Any
 
-from .brief_builder import render_brief_json
+from .brief_builder import render_brief_payload
 from .models import Candle, DailyBrief, Signal
 
 try:
@@ -72,8 +73,8 @@ def _extract_json_array(text: str) -> list[dict]:
         return json.loads(match.group(0))
 
 
-def _build_prompt(market_slice: dict[str, list[Candle]]) -> str:
-    payload = []
+def _market_prompt_payload(market_slice: dict[str, list[Candle]]) -> list[dict[str, Any]]:
+    payload: list[dict[str, Any]] = []
     for ticker, history in sorted(market_slice.items()):
         recent = history[-25:]
         payload.append(
@@ -92,7 +93,21 @@ def _build_prompt(market_slice: dict[str, list[Candle]]) -> str:
                 ],
             }
         )
-    return json.dumps(payload, separators=(",", ":"))
+    return payload
+
+
+def _build_market_prompt(market_slice: dict[str, list[Candle]]) -> str:
+    return json.dumps(_market_prompt_payload(market_slice), separators=(",", ":"))
+
+
+def _build_brief_prompt(brief: DailyBrief, max_new_trades: int) -> str:
+    return json.dumps(
+        {
+            "max_new_trades": max_new_trades,
+            "brief": render_brief_payload(brief),
+        },
+        separators=(",", ":"),
+    )
 
 
 def _create_client() -> OpenAI:
@@ -104,79 +119,70 @@ def _create_client() -> OpenAI:
     return OpenAI(api_key=api_key)
 
 
+def _request_openai_text(model: str, system_prompt: str, user_content: str, client: OpenAI | None = None) -> str:
+    selected_client = client or _create_client()
+    response = selected_client.responses.create(
+        model=model,
+        input=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ],
+    )
+    return response.output_text
+
+
+def _normalize_signal_item(item: dict[str, Any], buy_slot_available: bool = True) -> Signal | None:
+    ticker = str(item.get("ticker", "")).upper().strip()
+    action = str(item.get("action", "HOLD")).upper()
+    if not ticker or action not in {"BUY", "SELL", "HOLD"}:
+        return None
+    if action == "BUY" and not buy_slot_available:
+        action = "HOLD"
+    return Signal(
+        ticker=ticker,
+        score=float(item.get("score", 0.0)),
+        confidence=max(0.0, min(float(item.get("confidence", 0.5)), 1.0)),
+        action=action,
+        reason=str(item.get("reason", "")).strip(),
+    )
+
+
+def _normalize_signals(raw_signals: list[dict[str, Any]]) -> list[Signal]:
+    signals = []
+    for item in raw_signals:
+        signal = _normalize_signal_item(item)
+        if signal:
+            signals.append(signal)
+    return sorted(signals, key=lambda item: (item.action != "BUY", -abs(item.score), -item.confidence, item.ticker))
+
+
+def _normalize_brief_decisions(raw_signals: list[dict[str, Any]], max_new_trades: int) -> list[Signal]:
+    decisions: list[Signal] = []
+    buy_count = 0
+    for item in raw_signals:
+        action = str(item.get("action", "HOLD")).upper()
+        buy_slot_available = True
+        if action == "BUY":
+            buy_count += 1
+            buy_slot_available = buy_count <= max_new_trades
+        signal = _normalize_signal_item(item, buy_slot_available=buy_slot_available)
+        if signal:
+            decisions.append(signal)
+    return sorted(decisions, key=lambda item: (item.action != "BUY", -item.confidence, -abs(item.score), item.ticker))
+
+
 def score_with_openai(
     market_slice: dict[str, list[Candle]],
     model: str,
 ) -> list[Signal]:
     """Ask OpenAI for ticker actions."""
-    client = _create_client()
-    response = client.responses.create(
-        model=model,
-        input=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": _build_prompt(market_slice)},
-        ],
-    )
-    text = response.output_text
+    text = _request_openai_text(model, SYSTEM_PROMPT, _build_market_prompt(market_slice))
     raw_signals = _extract_json_array(text)
-
-    signals: list[Signal] = []
-    for item in raw_signals:
-        ticker = str(item.get("ticker", "")).upper().strip()
-        action = str(item.get("action", "HOLD")).upper()
-        confidence = float(item.get("confidence", 0.5))
-        score = float(item.get("score", 0.0))
-        reason = str(item.get("reason", "")).strip()
-        if ticker and action in {"BUY", "SELL", "HOLD"}:
-            signals.append(
-                Signal(
-                    ticker=ticker,
-                    score=score,
-                    confidence=max(0.0, min(confidence, 1.0)),
-                    action=action,
-                    reason=reason,
-                )
-            )
-    return sorted(signals, key=lambda item: (item.action != "BUY", -abs(item.score), -item.confidence, item.ticker))
+    return _normalize_signals(raw_signals)
 
 
 def decide_from_brief(brief: DailyBrief, model: str, max_new_trades: int = 3) -> list[Signal]:
     """Ask OpenAI to convert the end-of-day brief into next-session decisions."""
-    client = _create_client()
-    response = client.responses.create(
-        model=model,
-        input=[
-            {"role": "system", "content": BRIEF_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": json.dumps(
-                    {
-                        "max_new_trades": max_new_trades,
-                        "brief": json.loads(render_brief_json(brief)),
-                    },
-                    separators=(",", ":"),
-                ),
-            },
-        ],
-    )
-    raw_signals = _extract_json_array(response.output_text)
-    decisions: list[Signal] = []
-    buy_count = 0
-    for item in raw_signals:
-        ticker = str(item.get("ticker", "")).upper().strip()
-        action = str(item.get("action", "HOLD")).upper()
-        if action == "BUY":
-            buy_count += 1
-            if buy_count > max_new_trades:
-                action = "HOLD"
-        if ticker and action in {"BUY", "SELL", "HOLD"}:
-            decisions.append(
-                Signal(
-                    ticker=ticker,
-                    score=float(item.get("score", 0.0)),
-                    confidence=max(0.0, min(float(item.get("confidence", 0.5)), 1.0)),
-                    action=action,
-                    reason=str(item.get("reason", "")).strip(),
-                )
-            )
-    return sorted(decisions, key=lambda item: (item.action != "BUY", -item.confidence, -abs(item.score), item.ticker))
+    text = _request_openai_text(model, BRIEF_SYSTEM_PROMPT, _build_brief_prompt(brief, max_new_trades))
+    raw_signals = _extract_json_array(text)
+    return _normalize_brief_decisions(raw_signals, max_new_trades)
