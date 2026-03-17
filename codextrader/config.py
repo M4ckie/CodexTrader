@@ -154,6 +154,32 @@ def _default_scenarios_payload() -> dict:
                 "max_new_trades": 4,
                 "avoid_earnings_within_days": 1,
             },
+            "discovery_100k": {
+                "description": "Discovery-focused profile that searches smaller, less-followed names for early turnarounds and catalyst-driven setups.",
+                "bot": {
+                    "initial_cash": 100_000.0,
+                    "max_positions": 6,
+                    "position_size_pct": 0.18,
+                    "buy_threshold": 0.46,
+                    "sell_threshold": -0.28,
+                    "stop_loss_pct": 0.12,
+                    "take_profit_pct": 0.30,
+                    "slippage_pct": 0.0015,
+                    "commission": 1.0,
+                    "confidence_scale": 1.8,
+                },
+                "universe": {
+                    "market_scope": "us_equities",
+                    "min_price": 3.0,
+                    "min_market_cap": 150_000_000.0,
+                    "min_avg_dollar_volume": 2_500_000.0,
+                    "include_etfs": False,
+                    "max_universe_size": 180,
+                    "max_brief_candidates": 24,
+                },
+                "max_new_trades": 4,
+                "avoid_earnings_within_days": 0,
+            },
         },
     }
 

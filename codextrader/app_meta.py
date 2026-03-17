@@ -6,6 +6,7 @@ APP_NAME = "CodexTrader"
 APP_VERSION = "0.1.0"
 
 DASHBOARD_PAGES = [
+    "Scenario Compare",
     "Overview",
     "Decisions",
     "Brief History",

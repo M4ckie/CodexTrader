@@ -103,6 +103,47 @@ def _history_index_frame(history) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _scenario_comparison_frame(scenarios: dict, repository: ArtifactRepository) -> pd.DataFrame:
+    rows = []
+    for name, scenario_cfg in scenarios.items():
+        portfolio = load_portfolio(PORTFOLIO_DIR, name)
+        execution_payload, _ = repository.find_latest_execution(name)
+        latest_equity = portfolio.cash
+        latest_market_as_of = None
+        candidate_count = 0
+        candidates = ""
+        decisions = 0
+        executed = 0
+        if execution_payload:
+            latest_equity = execution_payload.portfolio_context.get("equity", latest_equity)
+            latest_market_as_of = execution_payload.market_as_of
+            candidate_count = len(execution_payload.tickers)
+            candidates = ", ".join(execution_payload.tickers[:6])
+            decisions = len(execution_payload.decisions)
+            executed = len(execution_payload.executed_trades)
+        rows.append(
+            {
+                "Scenario": name,
+                "Description": scenario_cfg.description,
+                "Cash": round(portfolio.cash, 2),
+                "Equity": round(latest_equity, 2),
+                "Open Positions": len(portfolio.positions),
+                "Pending Orders": len(portfolio.pending_orders),
+                "Trades Logged": len(portfolio.trade_log),
+                "Last Run": latest_market_as_of or "none",
+                "Candidates": candidate_count,
+                "Decisions": decisions,
+                "Executed Trades": executed,
+                "Universe Max": scenario_cfg.universe.max_universe_size,
+                "Min Price": scenario_cfg.universe.min_price,
+                "Min Market Cap": scenario_cfg.universe.min_market_cap,
+                "Min Dollar Vol": scenario_cfg.universe.min_avg_dollar_volume,
+                "Top Tickers": candidates,
+            }
+        )
+    return pd.DataFrame(rows).sort_values(["Equity", "Scenario"], ascending=[False, True])
+
+
 scenarios = get_scenarios()
 scenario_name = st.sidebar.selectbox("Scenario", options=list(scenarios.keys()))
 scenario = get_scenario(scenario_name)
@@ -115,6 +156,24 @@ execution_history = ARTIFACTS.load_execution_history(scenario_name)
 brief_markdown = _load_latest_brief_markdown(execution_path)
 scheduler_status = ARTIFACTS.load_scheduler_status()
 brief_portfolio_context = _brief_portfolio_context(execution_payload, execution_path)
+
+if page == "Scenario Compare":
+    st.title(f"{APP_NAME} Scenario Compare", anchor="scenario-compare")
+    comparison_df = _scenario_comparison_frame(scenarios, ARTIFACTS)
+    a, b, c, d = st.columns(4)
+    a.metric("Scenario Count", len(comparison_df))
+    b.metric("Best Equity", f"${comparison_df['Equity'].max():,.2f}" if not comparison_df.empty else "$0.00")
+    c.metric("Most Open Positions", int(comparison_df["Open Positions"].max()) if not comparison_df.empty else 0)
+    d.metric("Most Candidates", int(comparison_df["Candidates"].max()) if not comparison_df.empty else 0)
+
+    st.subheader("Scenario Summary", anchor="scenario-summary")
+    st.dataframe(comparison_df, width="stretch", hide_index=True)
+
+    if not comparison_df.empty:
+        chart_df = comparison_df.set_index("Scenario")[["Equity", "Cash", "Open Positions", "Candidates"]]
+        st.subheader("Quick Compare", anchor="scenario-compare-chart")
+        st.bar_chart(chart_df[["Equity", "Cash"]], height=320)
+        st.bar_chart(chart_df[["Open Positions", "Candidates"]], height=260)
 
 if page == "Overview":
     st.title(f"{APP_NAME} Dashboard: {scenario_name}", anchor=f"dashboard-{scenario_name}")
